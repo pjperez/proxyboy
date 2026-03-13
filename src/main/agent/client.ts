@@ -29,19 +29,25 @@ export class AgentClient {
 
     try {
       this.sdk = await loadSdk();
-      // In Electron, process.execPath is the Electron binary, not Node.
-      // ELECTRON_RUN_AS_NODE=1 makes the spawned electron act as Node.
-      // We also strip Copilot env vars that leak from the parent Copilot CLI
-      // process to avoid confusing the child CLI instance.
-      const cleanEnv: Record<string, string | undefined> = { ...process.env, ELECTRON_RUN_AS_NODE: '1' };
-      delete cleanEnv.COPILOT_CLI;
-      delete cleanEnv.COPILOT_RUN_APP;
-      delete cleanEnv.COPILOT_LOADER_PID;
-      delete cleanEnv.COPILOT_CLI_BINARY_VERSION;
+      // Use the native copilot binary instead of the JS entry point.
+      // The SDK's default uses process.execPath (electron.exe) to run
+      // the JS CLI, which fails because Electron's argv handling differs
+      // from Node's. The native binary avoids this entirely.
+      const { join } = await import('path');
+      const { existsSync } = await import('fs');
 
-      this.client = new this.sdk.CopilotClient({
-        env: cleanEnv,
-      });
+      // Try multiple possible locations for the native binary
+      const candidates = [
+        join(__dirname, '..', '..', 'node_modules', '@github', 'copilot-win32-x64', 'copilot.exe'),
+        join(process.cwd(), 'node_modules', '@github', 'copilot-win32-x64', 'copilot.exe'),
+      ];
+      const cliPath = candidates.find(p => existsSync(p));
+
+      if (!cliPath) {
+        throw new Error('Copilot CLI native binary not found');
+      }
+
+      this.client = new this.sdk.CopilotClient({ cliPath });
       await this.client.start();
       this.initialized = true;
     } catch (error) {
