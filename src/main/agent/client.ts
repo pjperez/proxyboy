@@ -1,4 +1,9 @@
-import { CopilotClient, approveAll, defineTool } from '@github/copilot-sdk';
+// Dynamic import for ESM-only @github/copilot-sdk (Electron main is CJS)
+async function loadSdk() {
+  const sdk = await (Function('return import("@github/copilot-sdk")')() as Promise<typeof import('@github/copilot-sdk')>);
+  return sdk;
+}
+
 import { BrowserWindow } from 'electron';
 import { ProxyEngine } from '../proxy/engine';
 import { SYSTEM_PROMPT, buildContextPrompt } from './prompts';
@@ -7,11 +12,12 @@ import { HttpFlow } from '../../shared/types';
 import { randomUUID } from 'crypto';
 
 export class AgentClient {
-  private client: CopilotClient | null = null;
+  private client: any = null;
   private session: any = null;
   private proxyEngine: ProxyEngine;
   private mainWindow: BrowserWindow;
   private initialized = false;
+  private sdk: any = null;
 
   constructor(proxyEngine: ProxyEngine, mainWindow: BrowserWindow) {
     this.proxyEngine = proxyEngine;
@@ -22,7 +28,8 @@ export class AgentClient {
     if (this.initialized) return;
 
     try {
-      this.client = new CopilotClient();
+      this.sdk = await loadSdk();
+      this.client = new this.sdk.CopilotClient();
       await this.client.start();
       this.initialized = true;
     } catch (error) {
@@ -33,6 +40,7 @@ export class AgentClient {
 
   private buildTools() {
     const engine = this.proxyEngine;
+    const { defineTool } = this.sdk;
 
     const summarizeFlow = (flow: HttpFlow) => ({
       id: flow.id,
@@ -141,7 +149,7 @@ export class AgentClient {
           content: SYSTEM_PROMPT + contextPrompt,
         },
         tools: this.buildTools(),
-        onPermissionRequest: approveAll,
+        onPermissionRequest: this.sdk.approveAll,
       });
 
       // Stream events to renderer
