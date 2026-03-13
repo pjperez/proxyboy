@@ -29,7 +29,19 @@ export class AgentClient {
 
     try {
       this.sdk = await loadSdk();
-      this.client = new this.sdk.CopilotClient();
+      // In Electron, process.execPath is the Electron binary, not Node.
+      // ELECTRON_RUN_AS_NODE=1 makes the spawned electron act as Node.
+      // We also strip Copilot env vars that leak from the parent Copilot CLI
+      // process to avoid confusing the child CLI instance.
+      const cleanEnv: Record<string, string | undefined> = { ...process.env, ELECTRON_RUN_AS_NODE: '1' };
+      delete cleanEnv.COPILOT_CLI;
+      delete cleanEnv.COPILOT_RUN_APP;
+      delete cleanEnv.COPILOT_LOADER_PID;
+      delete cleanEnv.COPILOT_CLI_BINARY_VERSION;
+
+      this.client = new this.sdk.CopilotClient({
+        env: cleanEnv,
+      });
       await this.client.start();
       this.initialized = true;
     } catch (error) {
