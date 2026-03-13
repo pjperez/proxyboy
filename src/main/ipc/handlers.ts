@@ -1,5 +1,5 @@
 import { ipcMain, BrowserWindow } from 'electron';
-import { IPC_CHANNELS, DEFAULT_PROXY_PORT } from '../../shared/constants';
+import { IPC_CHANNELS } from '../../shared/constants';
 import { ProxyEngine } from '../proxy/engine';
 import { ProxyState, Rule, HttpFlow } from '../../shared/types';
 import { randomUUID } from 'crypto';
@@ -12,7 +12,7 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.PROXY_START, async (_event, port?: number) => {
     try {
       await proxyEngine.start();
-      return { success: true };
+      return { success: true, port: proxyEngine.getPort() };
     } catch (error: any) {
       return { success: false, error: error.message };
     }
@@ -26,7 +26,7 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.PROXY_STATUS, (): ProxyState => {
     return {
       running: proxyEngine.isRunning(),
-      port: DEFAULT_PROXY_PORT,
+      port: proxyEngine.getPort(),
       host: '127.0.0.1',
       isSystemProxy: false,
       totalRequests: proxyEngine.getFlows().length,

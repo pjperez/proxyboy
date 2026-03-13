@@ -31,6 +31,10 @@ export class ProxyEngine extends EventEmitter {
     return this.running;
   }
 
+  getPort(): number {
+    return this.options.port;
+  }
+
   getFlows(): HttpFlow[] {
     return Array.from(this.flows.values());
   }

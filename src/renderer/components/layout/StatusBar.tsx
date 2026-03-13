@@ -15,8 +15,11 @@ export default function StatusBar() {
       await api.proxy.stop();
       useAppStore.getState().setProxyRunning(false);
     } else {
-      await api.proxy.start();
+      const result = await api.proxy.start();
       useAppStore.getState().setProxyRunning(true);
+      if (result?.port) {
+        useAppStore.getState().setProxyPort(result.port);
+      }
     }
   };
 

@@ -40,6 +40,9 @@ export default function App() {
 
     api.proxy.getStatus().then((status: any) => {
       setProxyRunning(status.running);
+      if (status.port) {
+        useAppStore.getState().setProxyPort(status.port);
+      }
     });
 
     return () => {
