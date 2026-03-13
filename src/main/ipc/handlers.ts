@@ -146,6 +146,11 @@ export function registerIpcHandlers(
 }
 
 function sanitizeFlow(flow: HttpFlow): any {
+  const responseContentType = flow.response?.headers?.['content-type']
+    ? String(flow.response.headers['content-type']).toLowerCase()
+    : '';
+  const isImageResponse = responseContentType.startsWith('image/');
+
   return {
     ...flow,
     request: {
@@ -158,8 +163,11 @@ function sanitizeFlow(flow: HttpFlow): any {
       ? {
           ...flow.response,
           body: flow.response.body
-            ? (typeof flow.response.body === 'string' ? flow.response.body : flow.response.body.toString('utf8').slice(0, 10000))
+            ? isImageResponse
+              ? (typeof flow.response.body === 'string' ? flow.response.body : flow.response.body.toString('base64'))
+              : (typeof flow.response.body === 'string' ? flow.response.body : flow.response.body.toString('utf8').slice(0, 10000))
             : undefined,
+          _isBase64: isImageResponse && flow.response.body ? true : undefined,
         }
       : undefined,
   };

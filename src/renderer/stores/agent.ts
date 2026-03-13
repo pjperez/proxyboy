@@ -57,11 +57,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     try {
       const api = (window as any).proxyboy;
       if (api) {
-        const response = await api.agent.sendMessage(text);
+        const result = await api.agent.sendMessage(text);
+        const content = result?.content || result?.error || get().currentStreamContent;
         const assistantMessage: AgentMessage = {
           id: generateId(),
           role: 'assistant',
-          content: response || get().currentStreamContent,
+          content: content || 'No response received.',
           toolCalls: [...get().toolCalls],
           timestamp: Date.now(),
         };

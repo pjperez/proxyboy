@@ -43,7 +43,11 @@ export default function ResponseView({ response }: Props) {
           <h3 className="text-xs font-semibold text-pb-text-dim uppercase mb-2">
             Body ({response.bodySize} bytes)
           </h3>
-          <BodyViewer body={String(response.body)} contentType={String(response.headers['content-type'] || '')} />
+          <BodyViewer
+            body={String(response.body)}
+            contentType={String(response.headers['content-type'] || '')}
+            isBase64={(response as any)._isBase64}
+          />
         </section>
       )}
     </div>

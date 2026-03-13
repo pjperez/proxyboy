@@ -1,5 +1,6 @@
 import React from 'react';
 import type { AgentMessage as AgentMessageType } from '../../../shared/types';
+import MarkdownContent from './MarkdownContent';
 
 interface Props {
   message: AgentMessageType;
@@ -33,7 +34,11 @@ export default function AgentMessage({ message }: Props) {
         )}
 
         {/* Content */}
-        <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
+        {isUser ? (
+          <div className="whitespace-pre-wrap leading-relaxed">{message.content}</div>
+        ) : (
+          <MarkdownContent content={message.content} />
+        )}
 
         {/* Timestamp */}
         <div className="text-[10px] text-pb-text-dim mt-1.5">

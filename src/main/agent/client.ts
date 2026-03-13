@@ -162,6 +162,7 @@ export class AgentClient {
     });
 
     if (!this.session) {
+      console.log('[Agent] Creating session...');
       this.session = await this.client!.createSession({
         systemMessage: {
           content: SYSTEM_PROMPT + contextPrompt,
@@ -170,17 +171,21 @@ export class AgentClient {
         onPermissionRequest: this.sdk.approveAll,
       });
 
-      // Stream events to renderer
+      // Stream all events to renderer and log for debugging
       this.session.on((event: any) => {
+        console.log('[Agent] Event:', event.type);
         if (event.type === 'assistant.message_delta') {
           this.mainWindow.webContents.send(IPC_CHANNELS.AGENT_MESSAGE_DELTA, {
             content: event.data.deltaContent,
           });
         }
       });
+      console.log('[Agent] Session created');
     }
 
-    const response = await this.session.sendAndWait({ prompt: message });
+    console.log('[Agent] Sending message:', message.slice(0, 100));
+    const response = await this.session.sendAndWait({ prompt: message }, 120000);
+    console.log('[Agent] Response received:', !!response);
     const content = response?.data?.content || 'No response from agent.';
 
     this.mainWindow.webContents.send(IPC_CHANNELS.AGENT_MESSAGE_COMPLETE, {

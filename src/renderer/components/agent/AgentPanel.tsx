@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useAgentStore } from '../../stores/agent';
 import AgentMessage from './AgentMessage';
+import MarkdownContent from './MarkdownContent';
 
 interface Props {
   onClose: () => void;
@@ -113,8 +114,8 @@ export default function AgentPanel({ onClose }: Props) {
         ))}
 
         {isLoading && currentStreamContent && (
-          <div className="bg-pb-surface rounded-lg p-3 text-xs text-pb-text whitespace-pre-wrap">
-            {currentStreamContent}
+          <div className="bg-pb-surface rounded-lg p-3 text-xs text-pb-text">
+            <MarkdownContent content={currentStreamContent} />
             <span className="inline-block w-1.5 h-3 bg-pb-accent ml-0.5 animate-pulse" />
           </div>
         )}
