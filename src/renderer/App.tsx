@@ -23,7 +23,7 @@ export default function App() {
   const [selectedView, setSelectedView] = useState<View>('traffic');
   const [showAgent, setShowAgent] = useState(false);
   const [selectedFlowId, setSelectedFlowId] = useState<string | null>(null);
-  const { flows, addFlow, updateFlow } = useTrafficStore();
+  const { flows, addFlow, updateFlow, getFilteredFlows } = useTrafficStore();
   const { proxyRunning, setProxyRunning } = useAppStore();
 
   useEffect(() => {
@@ -68,6 +68,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  const filteredFlows = getFilteredFlows();
   const selectedFlow = selectedFlowId ? flows.find(f => f.id === selectedFlowId) : null;
 
   return (
@@ -87,7 +88,7 @@ export default function App() {
               <div className="flex flex-1 overflow-hidden">
                 <div className={`${selectedFlow ? 'w-1/2' : 'w-full'} overflow-hidden border-r border-pb-border`}>
                   <TrafficList
-                    flows={flows}
+                    flows={filteredFlows}
                     selectedId={selectedFlowId}
                     onSelect={setSelectedFlowId}
                   />

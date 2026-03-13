@@ -9,6 +9,17 @@ const STATUS_PRESETS = [
   { label: '4xx', min: 400, max: 499 },
   { label: '5xx', min: 500, max: 599 },
 ];
+const CONTENT_TYPE_PRESETS = [
+  { label: 'JSON', types: ['application/json'] },
+  { label: 'XML', types: ['application/xml', 'text/xml'] },
+  { label: 'HTML', types: ['text/html'] },
+  { label: 'CSS', types: ['text/css'] },
+  { label: 'JS', types: ['javascript'] },
+  { label: 'Form', types: ['application/x-www-form-urlencoded', 'multipart/form-data'] },
+  { label: 'Image', types: ['image/'] },
+  { label: 'Font', types: ['font/', 'application/font', 'woff'] },
+  { label: 'Media', types: ['video/', 'audio/'] },
+];
 
 export default function FilterBar() {
   const { filter, setFilter } = useTrafficStore();
@@ -36,6 +47,24 @@ export default function FilterBar() {
     setFilter({ ...filter, statusCodes: updated.length ? updated : undefined });
   };
 
+  const toggleContentType = (preset: { label: string; types: string[] }) => {
+    const current = filter.contentTypes || [];
+    // Check if any of this preset's types are active
+    const isActive = preset.types.some(t => current.includes(t));
+    let updated: string[];
+    if (isActive) {
+      updated = current.filter(t => !preset.types.includes(t));
+    } else {
+      updated = [...current, ...preset.types];
+    }
+    setFilter({ ...filter, contentTypes: updated.length ? updated : undefined });
+  };
+
+  const isContentTypeActive = (preset: { types: string[] }) => {
+    const current = filter.contentTypes || [];
+    return preset.types.some(t => current.includes(t));
+  };
+
   const toggleErrors = () => {
     setFilter({ ...filter, hasError: !filter.hasError });
   };
@@ -45,17 +74,17 @@ export default function FilterBar() {
     setFilter({});
   };
 
-  const hasFilters = searchText || filter.methods?.length || filter.statusCodes?.length || filter.hasError;
+  const hasFilters = searchText || filter.methods?.length || filter.statusCodes?.length || filter.contentTypes?.length || filter.hasError;
 
   return (
-    <div className="flex items-center gap-2 px-3 py-2 bg-pb-surface border-b border-pb-border">
+    <div className="flex items-center gap-2 px-3 py-2 bg-pb-surface border-b border-pb-border overflow-x-auto">
       {/* Search */}
-      <div className="relative flex-1 max-w-sm">
+      <div className="relative shrink-0 w-52">
         <input
           type="text"
           value={searchText}
           onChange={(e) => handleSearch(e.target.value)}
-          placeholder="Filter by URL... (Ctrl+F)"
+          placeholder="Filter URL... (Ctrl+F)"
           className="w-full h-7 bg-pb-bg border border-pb-border rounded px-3 pr-8 text-xs text-pb-text placeholder-pb-text-dim focus:outline-none focus:border-pb-accent"
         />
         {searchText && (
@@ -69,7 +98,7 @@ export default function FilterBar() {
       </div>
 
       {/* Method filters */}
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-1 shrink-0">
         {METHOD_OPTIONS.slice(0, 4).map(method => (
           <FilterChip
             key={method}
@@ -81,8 +110,8 @@ export default function FilterBar() {
       </div>
 
       {/* Status filters */}
-      <span className="text-pb-border">|</span>
-      <div className="flex items-center gap-1">
+      <span className="text-pb-border shrink-0">|</span>
+      <div className="flex items-center gap-1 shrink-0">
         {STATUS_PRESETS.map(preset => (
           <FilterChip
             key={preset.label}
@@ -93,8 +122,22 @@ export default function FilterBar() {
         ))}
       </div>
 
+      {/* Content type filters */}
+      <span className="text-pb-border shrink-0">|</span>
+      <div className="flex items-center gap-1 shrink-0">
+        {CONTENT_TYPE_PRESETS.map(preset => (
+          <FilterChip
+            key={preset.label}
+            label={preset.label}
+            active={isContentTypeActive(preset)}
+            onClick={() => toggleContentType(preset)}
+            color="success"
+          />
+        ))}
+      </div>
+
       {/* Error toggle */}
-      <span className="text-pb-border">|</span>
+      <span className="text-pb-border shrink-0">|</span>
       <FilterChip
         label="Errors"
         active={filter.hasError || false}
@@ -106,7 +149,7 @@ export default function FilterBar() {
       {hasFilters && (
         <button
           onClick={clearFilters}
-          className="text-xs text-pb-text-dim hover:text-pb-error ml-1"
+          className="text-xs text-pb-text-dim hover:text-pb-error ml-1 shrink-0"
         >
           Clear
         </button>

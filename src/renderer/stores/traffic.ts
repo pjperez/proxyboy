@@ -45,10 +45,16 @@ export const useTrafficStore = create<TrafficState>((set, get) => ({
       if (filter.protocols?.length && !filter.protocols.includes(flow.request.protocol)) {
         return false;
       }
-      if (filter.statusCodes?.length && flow.response) {
+      if (filter.statusCodes?.length) {
+        if (!flow.response) return false;
         const matches = filter.statusCodes.some(
           (range) => flow.response!.statusCode >= range.min && flow.response!.statusCode <= range.max
         );
+        if (!matches) return false;
+      }
+      if (filter.contentTypes?.length) {
+        const ct = (flow.response?.headers['content-type'] || '').toString().toLowerCase();
+        const matches = filter.contentTypes.some((type) => ct.includes(type));
         if (!matches) return false;
       }
       if (filter.hasError && (!flow.response || flow.response.statusCode < 400)) {
