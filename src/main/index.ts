@@ -58,10 +58,7 @@ const createWindow = (): void => {
   // Register IPC handlers
   registerIpcHandlers(mainWindow, proxyEngine);
 
-  // Open DevTools in development
-  if (process.env.NODE_ENV === 'development') {
-    mainWindow.webContents.openDevTools({ mode: 'detach' });
-  }
+  // Uncomment to open DevTools: mainWindow.webContents.openDevTools({ mode: 'detach' });
 };
 
 // Vite dev server URL declarations
