@@ -2,6 +2,7 @@ import { ipcMain, BrowserWindow } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants';
 import { ProxyEngine } from '../proxy/engine';
 import { CertificateManager } from '../proxy/certificate';
+import { AgentClient } from '../agent/client';
 import { ProxyState, Rule, HttpFlow } from '../../shared/types';
 import { randomUUID } from 'crypto';
 
@@ -10,6 +11,7 @@ export function registerIpcHandlers(
   proxyEngine: ProxyEngine,
   certManager: CertificateManager,
 ): void {
+  const agentClient = new AgentClient(proxyEngine, mainWindow);
   // Proxy control
   ipcMain.handle(IPC_CHANNELS.PROXY_START, async (_event, port?: number) => {
     try {
@@ -111,6 +113,21 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.BREAKPOINT_RESUME, (_event, data: any) => {
     proxyEngine.getInterceptor().resumeFlow(data.flowId, data.action);
     return { success: true };
+  });
+
+  // Agent
+  ipcMain.handle(IPC_CHANNELS.AGENT_SEND_MESSAGE, async (_event, data: { message: string; conversationId?: string }) => {
+    try {
+      const content = await agentClient.sendMessage(data.message);
+      return { success: true, content };
+    } catch (error: any) {
+      console.error('Agent error:', error);
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_STATUS, () => {
+    return { initialized: agentClient.isInitialized() };
   });
 
   // App

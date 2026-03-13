@@ -5,6 +5,11 @@ export default defineConfig({
   resolve: {
     conditions: ['node'],
   },
+  build: {
+    rollupOptions: {
+      external: ['@github/copilot-sdk'],
+    },
+  },
   plugins: [
     viteStaticCopy({
       targets: [

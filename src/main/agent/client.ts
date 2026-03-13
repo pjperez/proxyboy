@@ -2,7 +2,7 @@ import { CopilotClient, approveAll, defineTool } from '@github/copilot-sdk';
 import { BrowserWindow } from 'electron';
 import { ProxyEngine } from '../proxy/engine';
 import { SYSTEM_PROMPT, buildContextPrompt } from './prompts';
-import { IPC_CHANNELS, DEFAULT_PROXY_PORT } from '../../shared/constants';
+import { IPC_CHANNELS } from '../../shared/constants';
 import { HttpFlow } from '../../shared/types';
 import { randomUUID } from 'crypto';
 
@@ -84,6 +84,7 @@ export class AgentClient {
       }),
       defineTool('getErrorFlows', {
         description: 'Get all captured flows with 4xx or 5xx status codes',
+        parameters: { type: 'object', properties: {} },
         handler: async () => {
           const flows = engine.getFlows().filter((f: HttpFlow) => f.response && f.response.statusCode >= 400);
           return { count: flows.length, flows: flows.slice(0, 50).map(summarizeFlow) };
@@ -109,6 +110,7 @@ export class AgentClient {
       }),
       defineTool('getProxyStatus', {
         description: 'Get current proxy status including running state and flow counts',
+        parameters: { type: 'object', properties: {} },
         handler: async () => ({ running: engine.isRunning(), totalFlows: engine.getFlows().length, errorFlows: engine.getFlows().filter((f: HttpFlow) => f.response && f.response.statusCode >= 400).length }),
       }),
       defineTool('toggleProxy', {
@@ -130,12 +132,11 @@ export class AgentClient {
     const contextPrompt = buildContextPrompt({
       running: this.proxyEngine.isRunning(),
       totalRequests: this.proxyEngine.getFlows().length,
-      port: DEFAULT_PROXY_PORT,
+      port: this.proxyEngine.getPort(),
     });
 
     if (!this.session) {
       this.session = await this.client!.createSession({
-        model: 'claude-sonnet-4',
         systemMessage: {
           content: SYSTEM_PROMPT + contextPrompt,
         },
@@ -144,17 +145,12 @@ export class AgentClient {
       });
 
       // Stream events to renderer
-      this.session.on('assistant.message_delta', (event: any) => {
-        this.mainWindow.webContents.send(IPC_CHANNELS.AGENT_MESSAGE_DELTA, {
-          content: event.data.deltaContent,
-        });
-      });
-
-      this.session.on('tool.call', (event: any) => {
-        this.mainWindow.webContents.send(IPC_CHANNELS.AGENT_TOOL_CALL, {
-          name: event.data.name,
-          args: event.data.arguments,
-        });
+      this.session.on((event: any) => {
+        if (event.type === 'assistant.message_delta') {
+          this.mainWindow.webContents.send(IPC_CHANNELS.AGENT_MESSAGE_DELTA, {
+            content: event.data.deltaContent,
+          });
+        }
       });
     }
 
