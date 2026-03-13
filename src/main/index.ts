@@ -1,0 +1,83 @@
+import { app, BrowserWindow } from 'electron';
+import * as path from 'path';
+import { ProxyEngine } from './proxy/engine';
+import { CertificateManager } from './proxy/certificate';
+import { registerIpcHandlers } from './ipc/handlers';
+import { DEFAULT_PROXY_PORT, DEFAULT_PROXY_HOST } from '../shared/constants';
+
+// Handle creating/removing shortcuts on Windows when installing/uninstalling.
+if (require('electron-squirrel-startup')) {
+  app.quit();
+}
+
+let mainWindow: BrowserWindow | null = null;
+let proxyEngine: ProxyEngine | null = null;
+
+const createWindow = (): void => {
+  mainWindow = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    minWidth: 1000,
+    minHeight: 600,
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#1a1b26',
+      symbolColor: '#c0caf5',
+      height: 36,
+    },
+    backgroundColor: '#1a1b26',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  });
+
+  // In development, Vite serves from localhost
+  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+    mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+  } else {
+    mainWindow.loadFile(
+      path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`)
+    );
+  }
+
+  // Initialize proxy engine
+  const certManager = new CertificateManager();
+  proxyEngine = new ProxyEngine(
+    {
+      port: DEFAULT_PROXY_PORT,
+      host: DEFAULT_PROXY_HOST,
+      enableSsl: true,
+    },
+    certManager,
+  );
+
+  // Register IPC handlers
+  registerIpcHandlers(mainWindow, proxyEngine);
+
+  // Open DevTools in development
+  if (process.env.NODE_ENV === 'development') {
+    mainWindow.webContents.openDevTools({ mode: 'detach' });
+  }
+};
+
+// Vite dev server URL declarations
+declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
+declare const MAIN_WINDOW_VITE_NAME: string;
+
+app.whenReady().then(createWindow);
+
+app.on('window-all-closed', async () => {
+  if (proxyEngine?.isRunning()) {
+    await proxyEngine.stop();
+  }
+  app.quit();
+});
+
+app.on('activate', () => {
+  if (BrowserWindow.getAllWindows().length === 0) {
+    createWindow();
+  }
+});
