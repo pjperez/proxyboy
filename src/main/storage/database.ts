@@ -6,10 +6,29 @@ import { app } from 'electron';
 let db: SqlJsDatabase | null = null;
 let dbPath: string = '';
 
+function getWasmPath(): string {
+  // In packaged app, the WASM file is in the app resources
+  // In development, it's in node_modules
+  const candidates = [
+    path.join(__dirname, 'sql-wasm.wasm'),
+    path.join(process.resourcesPath || '', 'sql-wasm.wasm'),
+    path.resolve(__dirname, '../../node_modules/sql.js/dist/sql-wasm.wasm'),
+    path.resolve('node_modules/sql.js/dist/sql-wasm.wasm'),
+  ];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  // Fallback: let sql.js try its default resolution
+  return 'sql-wasm.wasm';
+}
+
 export async function initDatabase(): Promise<void> {
   if (db) return;
 
-  const SQL = await initSqlJs();
+  const wasmPath = getWasmPath();
+  const SQL = await initSqlJs({
+    locateFile: () => wasmPath,
+  });
   dbPath = path.join(app.getPath('userData'), 'proxyboy.db');
 
   if (fs.existsSync(dbPath)) {

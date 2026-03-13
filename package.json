@@ -2,7 +2,7 @@
   "name": "proxyboy",
   "version": "1.0.0",
   "description": "ProxyBoy — Agentic HTTP/HTTPS Debugging Proxy for Windows",
-  "main": ".vite/build/main.js",
+  "main": ".vite/build/index.js",
   "scripts": {
     "start": "electron-forge start",
     "build": "electron-forge make",
@@ -61,6 +61,7 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "vite": "^8.0.0",
+    "vite-plugin-static-copy": "^3.3.0",
     "vitest": "^4.1.0"
   }
 }
