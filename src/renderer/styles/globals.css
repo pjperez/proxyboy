@@ -1,12 +1,28 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+  --color-pb-bg: #1a1b26;
+  --color-pb-surface: #24283b;
+  --color-pb-surface-hover: #2f334d;
+  --color-pb-border: #3b3f5c;
+  --color-pb-text: #c0caf5;
+  --color-pb-text-dim: #565f89;
+  --color-pb-accent: #7aa2f7;
+  --color-pb-success: #9ece6a;
+  --color-pb-warning: #e0af68;
+  --color-pb-error: #f7768e;
+  --color-pb-info: #7dcfff;
+}
 
 @layer base {
   body {
-    @apply bg-pb-bg text-pb-text font-sans m-0 p-0 overflow-hidden;
+    background-color: var(--color-pb-bg);
+    color: var(--color-pb-text);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     -webkit-font-smoothing: antialiased;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
   }
 
   ::-webkit-scrollbar {
@@ -15,24 +31,23 @@
   }
 
   ::-webkit-scrollbar-track {
-    @apply bg-pb-bg;
+    background-color: var(--color-pb-bg);
   }
 
   ::-webkit-scrollbar-thumb {
-    @apply bg-pb-border rounded;
+    background-color: var(--color-pb-border);
+    border-radius: 0.25rem;
   }
 
   ::-webkit-scrollbar-thumb:hover {
-    @apply bg-pb-text-dim;
+    background-color: var(--color-pb-text-dim);
   }
 }
 
-@layer components {
-  .drag-region {
-    -webkit-app-region: drag;
-  }
+.drag-region {
+  -webkit-app-region: drag;
+}
 
-  .no-drag {
-    -webkit-app-region: no-drag;
-  }
+.no-drag {
+  -webkit-app-region: no-drag;
 }
