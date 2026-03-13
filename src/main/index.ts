@@ -3,6 +3,7 @@ import * as path from 'path';
 import { ProxyEngine } from './proxy/engine';
 import { CertificateManager } from './proxy/certificate';
 import { registerIpcHandlers } from './ipc/handlers';
+import { initDatabase, closeDatabase } from './storage/database';
 import { DEFAULT_PROXY_PORT, DEFAULT_PROXY_HOST } from '../shared/constants';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -67,12 +68,16 @@ const createWindow = (): void => {
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
 declare const MAIN_WINDOW_VITE_NAME: string;
 
-app.whenReady().then(createWindow);
+app.whenReady().then(async () => {
+  await initDatabase();
+  createWindow();
+});
 
 app.on('window-all-closed', async () => {
   if (proxyEngine?.isRunning()) {
     await proxyEngine.stop();
   }
+  closeDatabase();
   app.quit();
 });
 

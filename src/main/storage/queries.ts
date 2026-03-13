@@ -1,66 +1,59 @@
-import { getDatabase } from './database';
+import { getDatabase, persistDatabase } from './database';
 import { HttpFlow, HttpRequest, HttpResponse, Rule } from '../../shared/types';
 
 export function saveFlow(flow: HttpFlow): void {
   const db = getDatabase();
-  const insertFlow = db.prepare(`
-    INSERT OR REPLACE INTO flows (id, state, tags, notes, created_at)
-    VALUES (?, ?, ?, ?, ?)
-  `);
-  const insertRequest = db.prepare(`
-    INSERT OR REPLACE INTO requests (id, flow_id, method, url, protocol, host, path, headers, body, body_size, timestamp)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  const insertResponse = db.prepare(`
-    INSERT OR REPLACE INTO responses (id, request_id, flow_id, status_code, status_message, headers, body, body_size, timestamp, duration)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
 
-  const transaction = db.transaction(() => {
-    insertFlow.run(
-      flow.id,
-      flow.state,
-      JSON.stringify(flow.tags),
-      flow.notes || null,
-      flow.createdAt,
-    );
+  db.run(
+    `INSERT OR REPLACE INTO flows (id, state, tags, notes, created_at) VALUES (?, ?, ?, ?, ?)`,
+    [flow.id, flow.state, JSON.stringify(flow.tags), flow.notes || null, flow.createdAt],
+  );
 
-    insertRequest.run(
-      flow.request.id,
-      flow.id,
-      flow.request.method,
-      flow.request.url,
-      flow.request.protocol,
-      flow.request.host,
-      flow.request.path,
+  db.run(
+    `INSERT OR REPLACE INTO requests (id, flow_id, method, url, protocol, host, path, headers, body, body_size, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      flow.request.id, flow.id, flow.request.method, flow.request.url,
+      flow.request.protocol, flow.request.host, flow.request.path,
       JSON.stringify(flow.request.headers),
       flow.request.body ? String(flow.request.body) : null,
-      flow.request.bodySize,
-      flow.request.timestamp,
-    );
+      flow.request.bodySize, flow.request.timestamp,
+    ],
+  );
 
-    if (flow.response) {
-      insertResponse.run(
-        flow.response.id,
-        flow.response.requestId,
-        flow.id,
-        flow.response.statusCode,
-        flow.response.statusMessage,
+  if (flow.response) {
+    db.run(
+      `INSERT OR REPLACE INTO responses (id, request_id, flow_id, status_code, status_message, headers, body, body_size, timestamp, duration)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        flow.response.id, flow.response.requestId, flow.id,
+        flow.response.statusCode, flow.response.statusMessage,
         JSON.stringify(flow.response.headers),
         flow.response.body ? String(flow.response.body) : null,
-        flow.response.bodySize,
-        flow.response.timestamp,
-        flow.response.duration,
-      );
-    }
-  });
+        flow.response.bodySize, flow.response.timestamp, flow.response.duration,
+      ],
+    );
+  }
 
-  transaction();
+  persistDatabase();
+}
+
+function queryFlows(sql: string, params: any[] = []): HttpFlow[] {
+  const db = getDatabase();
+  const stmt = db.prepare(sql);
+  if (params.length) stmt.bind(params);
+
+  const flows: HttpFlow[] = [];
+  while (stmt.step()) {
+    const row = stmt.getAsObject();
+    flows.push(rowToFlow(row));
+  }
+  stmt.free();
+  return flows;
 }
 
 export function getFlows(limit = 1000, offset = 0): HttpFlow[] {
-  const db = getDatabase();
-  const rows = db.prepare(`
+  return queryFlows(`
     SELECT f.id, f.state, f.tags, f.notes, f.created_at,
            r.id as req_id, r.method, r.url, r.protocol, r.host, r.path,
            r.headers as req_headers, r.body as req_body, r.body_size as req_body_size, r.timestamp as req_timestamp,
@@ -72,14 +65,12 @@ export function getFlows(limit = 1000, offset = 0): HttpFlow[] {
     LEFT JOIN responses res ON res.flow_id = f.id
     ORDER BY f.created_at DESC
     LIMIT ? OFFSET ?
-  `).all(limit, offset) as any[];
-
-  return rows.map(rowToFlow);
+  `, [limit, offset]);
 }
 
 export function searchFlows(query: string): HttpFlow[] {
-  const db = getDatabase();
-  const rows = db.prepare(`
+  const pattern = `%${query}%`;
+  return queryFlows(`
     SELECT f.id, f.state, f.tags, f.notes, f.created_at,
            r.id as req_id, r.method, r.url, r.protocol, r.host, r.path,
            r.headers as req_headers, r.body as req_body, r.body_size as req_body_size, r.timestamp as req_timestamp,
@@ -92,14 +83,11 @@ export function searchFlows(query: string): HttpFlow[] {
     WHERE r.url LIKE ? OR r.body LIKE ? OR res.body LIKE ?
     ORDER BY f.created_at DESC
     LIMIT 500
-  `).all(`%${query}%`, `%${query}%`, `%${query}%`) as any[];
-
-  return rows.map(rowToFlow);
+  `, [pattern, pattern, pattern]);
 }
 
 export function getErrorFlows(): HttpFlow[] {
-  const db = getDatabase();
-  const rows = db.prepare(`
+  return queryFlows(`
     SELECT f.id, f.state, f.tags, f.notes, f.created_at,
            r.id as req_id, r.method, r.url, r.protocol, r.host, r.path,
            r.headers as req_headers, r.body as req_body, r.body_size as req_body_size, r.timestamp as req_timestamp,
@@ -112,42 +100,47 @@ export function getErrorFlows(): HttpFlow[] {
     WHERE res.status_code >= 400
     ORDER BY f.created_at DESC
     LIMIT 500
-  `).all() as any[];
-
-  return rows.map(rowToFlow);
+  `);
 }
 
 export function clearAllFlows(): void {
   const db = getDatabase();
-  db.exec('DELETE FROM responses; DELETE FROM requests; DELETE FROM flows;');
+  db.run('DELETE FROM responses');
+  db.run('DELETE FROM requests');
+  db.run('DELETE FROM flows');
+  persistDatabase();
 }
 
 export function saveRule(rule: Rule): void {
   const db = getDatabase();
-  db.prepare(`
-    INSERT OR REPLACE INTO rules (id, type, name, enabled, match_criteria, config, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    rule.id,
-    rule.type,
-    rule.name,
-    rule.enabled ? 1 : 0,
-    JSON.stringify(rule.matchCriteria),
-    JSON.stringify(rule),
-    rule.createdAt,
-    rule.updatedAt,
+  db.run(
+    `INSERT OR REPLACE INTO rules (id, type, name, enabled, match_criteria, config, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    [
+      rule.id, rule.type, rule.name, rule.enabled ? 1 : 0,
+      JSON.stringify(rule.matchCriteria), JSON.stringify(rule),
+      rule.createdAt, rule.updatedAt,
+    ],
   );
+  persistDatabase();
 }
 
 export function getRules(): Rule[] {
   const db = getDatabase();
-  const rows = db.prepare('SELECT config FROM rules ORDER BY created_at DESC').all() as any[];
-  return rows.map((r: any) => JSON.parse(r.config));
+  const stmt = db.prepare('SELECT config FROM rules ORDER BY created_at DESC');
+  const rules: Rule[] = [];
+  while (stmt.step()) {
+    const row = stmt.getAsObject();
+    rules.push(JSON.parse(row.config as string));
+  }
+  stmt.free();
+  return rules;
 }
 
 export function deleteRule(id: string): void {
   const db = getDatabase();
-  db.prepare('DELETE FROM rules WHERE id = ?').run(id);
+  db.run('DELETE FROM rules WHERE id = ?', [id]);
+  persistDatabase();
 }
 
 function rowToFlow(row: any): HttpFlow {

@@ -1,22 +1,45 @@
-import Database from 'better-sqlite3';
+import initSqlJs, { Database as SqlJsDatabase } from 'sql.js';
+import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
 
-let db: Database.Database | null = null;
+let db: SqlJsDatabase | null = null;
+let dbPath: string = '';
 
-export function getDatabase(): Database.Database {
+export async function initDatabase(): Promise<void> {
+  if (db) return;
+
+  const SQL = await initSqlJs();
+  dbPath = path.join(app.getPath('userData'), 'proxyboy.db');
+
+  if (fs.existsSync(dbPath)) {
+    const buffer = fs.readFileSync(dbPath);
+    db = new SQL.Database(buffer);
+  } else {
+    db = new SQL.Database();
+  }
+
+  db.run('PRAGMA foreign_keys = ON;');
+  initializeSchema(db);
+  persistDatabase();
+}
+
+export function getDatabase(): SqlJsDatabase {
   if (!db) {
-    const dbPath = path.join(app.getPath('userData'), 'proxyboy.db');
-    db = new Database(dbPath);
-    db.pragma('journal_mode = WAL');
-    db.pragma('foreign_keys = ON');
-    initializeSchema(db);
+    throw new Error('Database not initialized. Call initDatabase() first.');
   }
   return db;
 }
 
-function initializeSchema(database: Database.Database): void {
-  database.exec(`
+export function persistDatabase(): void {
+  if (db && dbPath) {
+    const data = db.export();
+    fs.writeFileSync(dbPath, Buffer.from(data));
+  }
+}
+
+function initializeSchema(database: SqlJsDatabase): void {
+  database.run(`
     CREATE TABLE IF NOT EXISTS flows (
       id TEXT PRIMARY KEY,
       state TEXT NOT NULL DEFAULT 'pending',
@@ -24,7 +47,8 @@ function initializeSchema(database: Database.Database): void {
       notes TEXT,
       created_at INTEGER NOT NULL
     );
-
+  `);
+  database.run(`
     CREATE TABLE IF NOT EXISTS requests (
       id TEXT PRIMARY KEY,
       flow_id TEXT NOT NULL,
@@ -39,7 +63,8 @@ function initializeSchema(database: Database.Database): void {
       timestamp INTEGER NOT NULL,
       FOREIGN KEY (flow_id) REFERENCES flows(id) ON DELETE CASCADE
     );
-
+  `);
+  database.run(`
     CREATE TABLE IF NOT EXISTS responses (
       id TEXT PRIMARY KEY,
       request_id TEXT NOT NULL,
@@ -53,7 +78,8 @@ function initializeSchema(database: Database.Database): void {
       duration INTEGER DEFAULT 0,
       FOREIGN KEY (flow_id) REFERENCES flows(id) ON DELETE CASCADE
     );
-
+  `);
+  database.run(`
     CREATE TABLE IF NOT EXISTS rules (
       id TEXT PRIMARY KEY,
       type TEXT NOT NULL,
@@ -64,14 +90,16 @@ function initializeSchema(database: Database.Database): void {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
-
+  `);
+  database.run(`
     CREATE TABLE IF NOT EXISTS agent_conversations (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
-
+  `);
+  database.run(`
     CREATE TABLE IF NOT EXISTS agent_messages (
       id TEXT PRIMARY KEY,
       conversation_id TEXT NOT NULL,
@@ -81,18 +109,18 @@ function initializeSchema(database: Database.Database): void {
       timestamp INTEGER NOT NULL,
       FOREIGN KEY (conversation_id) REFERENCES agent_conversations(id) ON DELETE CASCADE
     );
-
-    CREATE INDEX IF NOT EXISTS idx_requests_flow_id ON requests(flow_id);
-    CREATE INDEX IF NOT EXISTS idx_responses_flow_id ON responses(flow_id);
-    CREATE INDEX IF NOT EXISTS idx_requests_url ON requests(url);
-    CREATE INDEX IF NOT EXISTS idx_requests_method ON requests(method);
-    CREATE INDEX IF NOT EXISTS idx_responses_status_code ON responses(status_code);
-    CREATE INDEX IF NOT EXISTS idx_agent_messages_conversation ON agent_messages(conversation_id);
   `);
+  database.run('CREATE INDEX IF NOT EXISTS idx_requests_flow_id ON requests(flow_id);');
+  database.run('CREATE INDEX IF NOT EXISTS idx_responses_flow_id ON responses(flow_id);');
+  database.run('CREATE INDEX IF NOT EXISTS idx_requests_url ON requests(url);');
+  database.run('CREATE INDEX IF NOT EXISTS idx_requests_method ON requests(method);');
+  database.run('CREATE INDEX IF NOT EXISTS idx_responses_status_code ON responses(status_code);');
+  database.run('CREATE INDEX IF NOT EXISTS idx_agent_messages_conversation ON agent_messages(conversation_id);');
 }
 
 export function closeDatabase(): void {
   if (db) {
+    persistDatabase();
     db.close();
     db = null;
   }
