@@ -5,6 +5,8 @@ export const IPC_CHANNELS = {
   PROXY_STOP: 'proxy:stop',
   PROXY_STATUS: 'proxy:status',
   PROXY_SET_SYSTEM: 'proxy:set-system-proxy',
+  PROXY_INSTALL_CERT: 'proxy:install-cert',
+  PROXY_CERT_STATUS: 'proxy:cert-status',
   
   // Traffic
   TRAFFIC_NEW_FLOW: 'traffic:new-flow',

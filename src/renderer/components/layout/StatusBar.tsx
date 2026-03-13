@@ -1,12 +1,20 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useAppStore } from '../../stores/app';
 import { useTrafficStore } from '../../stores/traffic';
 
 export default function StatusBar() {
   const { proxyRunning, proxyPort } = useAppStore();
   const { flows } = useTrafficStore();
+  const [certInstalled, setCertInstalled] = useState<boolean | null>(null);
+  const [certInstalling, setCertInstalling] = useState(false);
 
   const errorCount = flows.filter(f => f.response && f.response.statusCode >= 400).length;
+
+  useEffect(() => {
+    window.proxyboy?.proxy.getCertStatus().then((s: any) => {
+      setCertInstalled(s.installed);
+    });
+  }, [proxyRunning]);
 
   const toggleProxy = async () => {
     const api = window.proxyboy;
@@ -20,6 +28,18 @@ export default function StatusBar() {
       if (result?.port) {
         useAppStore.getState().setProxyPort(result.port);
       }
+    }
+  };
+
+  const installCert = async () => {
+    setCertInstalling(true);
+    try {
+      const result = await window.proxyboy?.proxy.installCert();
+      if (result?.success) {
+        setCertInstalled(true);
+      }
+    } finally {
+      setCertInstalling(false);
     }
   };
 
@@ -47,6 +67,18 @@ export default function StatusBar() {
           <span className="text-pb-error">
             Errors: {errorCount}
           </span>
+        </>
+      )}
+      {proxyRunning && certInstalled === false && (
+        <>
+          <span className="mx-3 text-pb-border">|</span>
+          <button
+            onClick={installCert}
+            disabled={certInstalling}
+            className="text-pb-warning hover:text-pb-accent transition-colors"
+          >
+            {certInstalling ? 'Installing...' : '⚠ Install HTTPS Certificate'}
+          </button>
         </>
       )}
       <div className="flex-1" />

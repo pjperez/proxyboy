@@ -56,7 +56,7 @@ const createWindow = (): void => {
   );
 
   // Register IPC handlers
-  registerIpcHandlers(mainWindow, proxyEngine);
+  registerIpcHandlers(mainWindow, proxyEngine, certManager);
 
   // Uncomment to open DevTools: mainWindow.webContents.openDevTools({ mode: 'detach' });
 };

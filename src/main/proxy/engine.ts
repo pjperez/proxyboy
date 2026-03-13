@@ -53,6 +53,8 @@ export class ProxyEngine extends EventEmitter {
     await this.certManager.initialize();
 
     this.proxy.onError((ctx, err, errorKind) => {
+      // Suppress expected SSL errors (client doesn't trust our CA yet)
+      if (errorKind === 'HTTPS_CLIENT_ERROR') return;
       if (err) this.emit('proxy:error', err);
     });
 

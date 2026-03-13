@@ -9,6 +9,8 @@ const api = {
     stop: () => ipcRenderer.invoke(IPC_CHANNELS.PROXY_STOP),
     getStatus: (): Promise<ProxyState> => ipcRenderer.invoke(IPC_CHANNELS.PROXY_STATUS),
     setSystemProxy: (enabled: boolean) => ipcRenderer.invoke(IPC_CHANNELS.PROXY_SET_SYSTEM, enabled),
+    installCert: () => ipcRenderer.invoke(IPC_CHANNELS.PROXY_INSTALL_CERT),
+    getCertStatus: () => ipcRenderer.invoke(IPC_CHANNELS.PROXY_CERT_STATUS),
   },
 
   // Traffic

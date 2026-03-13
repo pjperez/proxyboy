@@ -1,12 +1,14 @@
 import { ipcMain, BrowserWindow } from 'electron';
 import { IPC_CHANNELS } from '../../shared/constants';
 import { ProxyEngine } from '../proxy/engine';
+import { CertificateManager } from '../proxy/certificate';
 import { ProxyState, Rule, HttpFlow } from '../../shared/types';
 import { randomUUID } from 'crypto';
 
 export function registerIpcHandlers(
   mainWindow: BrowserWindow,
   proxyEngine: ProxyEngine,
+  certManager: CertificateManager,
 ): void {
   // Proxy control
   ipcMain.handle(IPC_CHANNELS.PROXY_START, async (_event, port?: number) => {
@@ -21,6 +23,17 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.PROXY_STOP, async () => {
     await proxyEngine.stop();
     return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PROXY_INSTALL_CERT, async () => {
+    return certManager.installCaCertWindows();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PROXY_CERT_STATUS, async () => {
+    return {
+      exists: certManager.hasCaCert(),
+      installed: await certManager.isCaCertInstalled(),
+    };
   });
 
   ipcMain.handle(IPC_CHANNELS.PROXY_STATUS, (): ProxyState => {
