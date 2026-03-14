@@ -57,6 +57,16 @@ export function persistDatabase(): void {
   }
 }
 
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+export function schedulePersist(): void {
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    persistDatabase();
+  }, 5000);
+}
+
 function initializeSchema(database: SqlJsDatabase): void {
   database.run(`
     CREATE TABLE IF NOT EXISTS flows (
@@ -139,6 +149,10 @@ function initializeSchema(database: SqlJsDatabase): void {
 
 export function closeDatabase(): void {
   if (db) {
+    if (persistTimer) {
+      clearTimeout(persistTimer);
+      persistTimer = null;
+    }
     persistDatabase();
     db.close();
     db = null;

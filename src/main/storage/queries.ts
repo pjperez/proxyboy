@@ -1,4 +1,4 @@
-import { getDatabase, persistDatabase } from './database';
+import { getDatabase, schedulePersist } from './database';
 import { HttpFlow, HttpRequest, HttpResponse, Rule } from '../../shared/types';
 
 export function saveFlow(flow: HttpFlow): void {
@@ -35,7 +35,7 @@ export function saveFlow(flow: HttpFlow): void {
     );
   }
 
-  persistDatabase();
+  schedulePersist();
 }
 
 function queryFlows(sql: string, params: any[] = []): HttpFlow[] {
@@ -108,7 +108,7 @@ export function clearAllFlows(): void {
   db.run('DELETE FROM responses');
   db.run('DELETE FROM requests');
   db.run('DELETE FROM flows');
-  persistDatabase();
+  schedulePersist();
 }
 
 export function saveRule(rule: Rule): void {
@@ -122,7 +122,7 @@ export function saveRule(rule: Rule): void {
       rule.createdAt, rule.updatedAt,
     ],
   );
-  persistDatabase();
+  schedulePersist();
 }
 
 export function getRules(): Rule[] {
@@ -140,7 +140,7 @@ export function getRules(): Rule[] {
 export function deleteRule(id: string): void {
   const db = getDatabase();
   db.run('DELETE FROM rules WHERE id = ?', [id]);
-  persistDatabase();
+  schedulePersist();
 }
 
 function rowToFlow(row: any): HttpFlow {

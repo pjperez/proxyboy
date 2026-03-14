@@ -1,5 +1,7 @@
 import { HttpFlow, HttpRequest, HttpResponse, BreakpointRule, MapLocalRule, Rule } from '../../shared/types';
 import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 export class Interceptor {
   private breakpointRules: BreakpointRule[] = [];
@@ -16,6 +18,7 @@ export class Interceptor {
 
   matchesUrl(pattern: string, url: string, isRegex?: boolean): boolean {
     if (isRegex) {
+      if (pattern.length > 500) return false;
       try {
         return new RegExp(pattern).test(url);
       } catch {
@@ -51,7 +54,32 @@ export class Interceptor {
 
   getMapLocalResponse(rule: MapLocalRule): { statusCode: number; headers: Record<string, string>; body: Buffer } | null {
     try {
-      const body = fs.readFileSync(rule.localFilePath);
+      const resolvedPath = path.resolve(rule.localFilePath);
+      const lowerPath = resolvedPath.toLowerCase();
+
+      // Block system directories
+      if (lowerPath.startsWith('c:\\windows')) {
+        console.warn('[Interceptor] Map-local path blocked (system directory):', resolvedPath);
+        return null;
+      }
+
+      // Block known sensitive paths
+      const sensitivePatterns = [
+        'appdata\\local\\google',
+        'appdata\\roaming\\mozilla',
+      ];
+      if (sensitivePatterns.some(p => lowerPath.includes(p))) {
+        console.warn('[Interceptor] Map-local path blocked (sensitive path):', resolvedPath);
+        return null;
+      }
+
+      // Warn if outside user home
+      const userHome = os.homedir();
+      if (!lowerPath.startsWith(userHome.toLowerCase())) {
+        console.warn('[Interceptor] Map-local path outside user home:', resolvedPath);
+      }
+
+      const body = fs.readFileSync(resolvedPath);
       const ext = rule.localFilePath.split('.').pop()?.toLowerCase();
       const contentTypeMap: Record<string, string> = {
         json: 'application/json',

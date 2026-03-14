@@ -8,6 +8,9 @@ import { CertificateManager } from './certificate';
 import { Interceptor } from './interceptor';
 import { ProxyEngineOptions } from './types';
 
+const MAX_FLOWS = 10000;
+const MAX_BODY_SIZE = 2 * 1024 * 1024; // 2 MB
+
 function decompressBody(body: Buffer, encoding?: string): Buffer {
   if (!encoding) return body;
   const enc = encoding.toLowerCase().trim();
@@ -29,6 +32,7 @@ export class ProxyEngine extends EventEmitter {
   private options: ProxyEngineOptions;
   private flows: Map<string, HttpFlow> = new Map();
   private running = false;
+  private setupDone = false;
 
   constructor(options: ProxyEngineOptions, certManager: CertificateManager) {
     super();
@@ -62,10 +66,9 @@ export class ProxyEngine extends EventEmitter {
     this.flows.clear();
   }
 
-  async start(): Promise<void> {
-    if (this.running) return;
-
-    await this.certManager.initialize();
+  private setup(): void {
+    if (this.setupDone) return;
+    this.setupDone = true;
 
     this.proxy.onError((ctx, err, errorKind) => {
       // Suppress ALL common transient errors silently
@@ -91,10 +94,6 @@ export class ProxyEngine extends EventEmitter {
     });
 
     // Suppress noisy console output from http-mitm-proxy internals.
-    // The library writes errors as multiple separate write() calls (kind, then
-    // Error object, then stack frames). We use a time-window approach: when a
-    // trigger pattern is seen, suppress ALL output for 200ms to catch the
-    // trailing stack trace that follows.
     const NOISE_PATTERNS = [
       'HTTPS_CLIENT_ERROR',
       'creating SNI context',
@@ -119,9 +118,8 @@ export class ProxyEngine extends EventEmitter {
     const shouldSuppressWrite = (chunk: any): boolean => {
       const now = Date.now();
       const str = typeof chunk === 'string' ? chunk : chunk?.toString?.() || '';
-      // In suppression window — swallow stack traces & error continuations
       if (now < suppressUntil) {
-        suppressUntil = now + 200; // extend window for cascading errors
+        suppressUntil = now + 200;
         return true;
       }
       for (const p of NOISE_PATTERNS) {
@@ -223,8 +221,18 @@ export class ProxyEngine extends EventEmitter {
       // Collect response
       const responseChunks: Buffer[] = [];
 
-      ctx.onResponse((ctx: any, callback: () => void) => {
-        callback();
+      ctx.onResponse((ctx: any, cb: () => void) => {
+        // Response-phase breakpoint
+        const responseBreakRule = this.interceptor.shouldBreakpoint(flow, 'response');
+        if (responseBreakRule) {
+          this.emit('breakpoint:paused', { flowId, flow, phase: 'response' });
+          this.interceptor.pauseFlow(flowId, flow).then(action => {
+            if (action === 'drop') return;
+            cb();
+          });
+          return;
+        }
+        cb();
       });
 
       ctx.onResponseData((ctx: any, chunk: Buffer, callback: (err: null, chunk: Buffer) => void) => {
@@ -232,9 +240,16 @@ export class ProxyEngine extends EventEmitter {
         callback(null, chunk);
       });
 
-      ctx.onResponseEnd((ctx: any, callback: () => void) => {
+      ctx.onResponseEnd((ctx: any, cb: () => void) => {
         const rawBody = responseChunks.length > 0 ? Buffer.concat(responseChunks) : undefined;
-        const responseBody = rawBody ? decompressBody(rawBody, ctx.serverToProxyResponse?.headers?.['content-encoding']) : undefined;
+        let responseBody = rawBody ? decompressBody(rawBody, ctx.serverToProxyResponse?.headers?.['content-encoding']) : undefined;
+
+        // Body size cap (2 MB)
+        if (responseBody && responseBody.length > MAX_BODY_SIZE) {
+          responseBody = responseBody.subarray(0, MAX_BODY_SIZE);
+          flow.tags.push('body-truncated');
+        }
+
         const response: HttpResponse = {
           id: randomUUID(),
           requestId: request.id,
@@ -250,12 +265,42 @@ export class ProxyEngine extends EventEmitter {
         flow.response = response;
         flow.state = 'complete';
         this.flows.set(flowId, flow);
+
+        // Flow retention cap — evict oldest 20% when over limit
+        if (this.flows.size > MAX_FLOWS) {
+          const deleteCount = Math.floor(MAX_FLOWS * 0.2);
+          let deleted = 0;
+          for (const key of this.flows.keys()) {
+            if (deleted >= deleteCount) break;
+            this.flows.delete(key);
+            deleted++;
+          }
+        }
+
         this.emit('flow:complete', flow);
-        callback();
+        cb();
       });
+
+      // Request-phase breakpoint check
+      const breakRule = this.interceptor.shouldBreakpoint(flow, 'request');
+      if (breakRule) {
+        this.emit('breakpoint:paused', { flowId, flow, phase: 'request' });
+        this.interceptor.pauseFlow(flowId, flow).then(action => {
+          if (action === 'drop') return;
+          callback();
+        });
+        return;
+      }
 
       callback();
     });
+  }
+
+  async start(): Promise<void> {
+    if (this.running) return;
+
+    await this.certManager.initialize();
+    this.setup();
 
     return new Promise<void>((resolve, reject) => {
       this.proxy.listen(

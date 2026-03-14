@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useAppStore } from '../../stores/app';
 import { useTrafficStore } from '../../stores/traffic';
 
@@ -9,7 +9,10 @@ export default function StatusBar() {
   const [certInstalling, setCertInstalling] = useState(false);
   const [isSystemProxy, setIsSystemProxy] = useState(false);
 
-  const errorCount = flows.filter(f => f.response && f.response.statusCode >= 400).length;
+  const errorCount = useMemo(
+    () => flows.filter(f => f.response && f.response.statusCode >= 400).length,
+    [flows]
+  );
 
   useEffect(() => {
     window.proxyboy?.proxy.getCertStatus().then((s: any) => {

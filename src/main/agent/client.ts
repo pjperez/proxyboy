@@ -215,7 +215,19 @@ export class AgentClient {
           });
 
           return new Promise<{ kind: string }>((resolve) => {
-            this.pendingPermissions.set(id, { resolve });
+            const timeoutId = setTimeout(() => {
+              if (this.pendingPermissions.has(id)) {
+                this.pendingPermissions.delete(id);
+                resolve({ kind: 'denied' });
+              }
+            }, 60000);
+
+            this.pendingPermissions.set(id, {
+              resolve: (value: { kind: string }) => {
+                clearTimeout(timeoutId);
+                resolve(value);
+              },
+            });
           });
         },
       });

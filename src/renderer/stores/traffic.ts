@@ -1,6 +1,8 @@
 import { create } from 'zustand';
 import type { HttpFlow, FilterCriteria } from '../../shared/types';
 
+const MAX_RENDERER_FLOWS = 5000;
+
 interface TrafficState {
   flows: HttpFlow[];
   filter: FilterCriteria;
@@ -16,9 +18,13 @@ export const useTrafficStore = create<TrafficState>((set, get) => ({
   filter: {},
 
   addFlow: (flow) =>
-    set((state) => ({
-      flows: [...state.flows, flow],
-    })),
+    set((state) => {
+      const next = [...state.flows, flow];
+      if (next.length > MAX_RENDERER_FLOWS) {
+        return { flows: next.slice(Math.floor(MAX_RENDERER_FLOWS * 0.2)) };
+      }
+      return { flows: next };
+    }),
 
   updateFlow: (flow) =>
     set((state) => ({

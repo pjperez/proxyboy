@@ -225,6 +225,7 @@ export function registerIpcHandlers(
         preload: path.join(__dirname, 'preload.js'),
         contextIsolation: true,
         nodeIntegration: false,
+        webSecurity: true,
         sandbox: false,
       },
     });
@@ -237,6 +238,13 @@ export function registerIpcHandlers(
         { query: { view: 'agent' } },
       );
     }
+
+    // Harden agent window
+    agentWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+    agentWindow.webContents.on('will-navigate', (event, url) => {
+      if (MAIN_WINDOW_VITE_DEV_SERVER_URL && url.startsWith(MAIN_WINDOW_VITE_DEV_SERVER_URL)) return;
+      event.preventDefault();
+    });
 
     agentWindow.on('closed', () => {
       agentWindow = null;
@@ -292,9 +300,25 @@ export function registerIpcHandlers(
 
     if (canceled || !filePaths.length) return { success: false, canceled: true };
 
-    const content = fs.readFileSync(filePaths[0], 'utf8');
-    const har = JSON.parse(content);
-    const entries = har?.log?.entries || [];
+    // File size check
+    const stats = fs.statSync(filePaths[0]);
+    if (stats.size > 100 * 1024 * 1024) {
+      return { success: false, error: 'HAR file is too large (max 100 MB).' };
+    }
+
+    let har: any;
+    try {
+      const content = fs.readFileSync(filePaths[0], 'utf8');
+      har = JSON.parse(content);
+    } catch {
+      return { success: false, error: 'Invalid HAR file: could not parse JSON.' };
+    }
+
+    if (!har?.log?.entries || !Array.isArray(har.log.entries)) {
+      return { success: false, error: 'Invalid HAR file: missing or malformed log.entries.' };
+    }
+
+    const entries: any[] = har.log.entries;
 
     const importedFlows: any[] = entries.map((entry: any, i: number) => {
       const id = `har-import-${Date.now()}-${i}`;
@@ -356,6 +380,13 @@ export function registerIpcHandlers(
   proxyEngine.on('flow:complete', (flow: HttpFlow) => {
     mainWindow.webContents.send(IPC_CHANNELS.TRAFFIC_FLOW_COMPLETE, sanitizeFlow(flow));
     saveFlow(flow);
+  });
+
+  // Forward breakpoint events to renderer
+  proxyEngine.on('breakpoint:paused', (data: any) => {
+    if (!mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC_CHANNELS.BREAKPOINT_PAUSED, data);
+    }
   });
 }
 

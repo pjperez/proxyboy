@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import TitleBar from './components/layout/TitleBar';
 import Sidebar from './components/layout/Sidebar';
 import StatusBar from './components/layout/StatusBar';
@@ -9,6 +9,7 @@ import AgentPanel from './components/agent/AgentPanel';
 import BreakpointEditor from './components/rules/BreakpointEditor';
 import MapLocalEditor from './components/rules/MapLocalEditor';
 import SettingsPanel from './components/settings/SettingsPanel';
+import BreakpointPauseDialog from './components/rules/BreakpointPauseDialog';
 import { useTrafficStore } from './stores/traffic';
 import { useRulesStore } from './stores/rules';
 import { useAppStore } from './stores/app';
@@ -64,7 +65,13 @@ function MainApp() {
     setShowAgent(false);
   }, []);
 
-  const { flows, addFlow, updateFlow, getFilteredFlows } = useTrafficStore();
+  const [breakpointPause, setBreakpointPause] = useState<{flowId: string; flow: any; phase: string} | null>(null);
+
+  const flows = useTrafficStore(s => s.flows);
+  const filter = useTrafficStore(s => s.filter);
+  const addFlow = useTrafficStore(s => s.addFlow);
+  const updateFlow = useTrafficStore(s => s.updateFlow);
+  const getFilteredFlows = useTrafficStore(s => s.getFilteredFlows);
   const { addRule } = useRulesStore();
   const { proxyRunning, setProxyRunning } = useAppStore();
 
@@ -85,10 +92,23 @@ function MainApp() {
       setAgentDetached(false);
     });
 
+    const unsubBreakpoint = api.breakpoint?.onPaused?.((data: any) => {
+      setBreakpointPause(data);
+    });
+
     api.proxy.getStatus().then((status: any) => {
       setProxyRunning(status.running);
       if (status.port) {
         useAppStore.getState().setProxyPort(status.port);
+      }
+      // Auto-start if enabled and not already running
+      if (!status.running && localStorage.getItem('proxyboy-auto-start') === 'true') {
+        api.proxy.start().then((result: any) => {
+          if (result?.success) {
+            useAppStore.getState().setProxyRunning(true);
+            if (result.port) useAppStore.getState().setProxyPort(result.port);
+          }
+        });
       }
     });
 
@@ -96,6 +116,7 @@ function MainApp() {
       unsubNew();
       unsubComplete();
       unsubRuleCreated?.();
+      unsubBreakpoint?.();
       unsubAgentClosed();
     };
   }, []);
@@ -121,7 +142,7 @@ function MainApp() {
     return () => window.removeEventListener('keydown', handler);
   }, [agentDetached]);
 
-  const filteredFlows = getFilteredFlows();
+  const filteredFlows = useMemo(() => getFilteredFlows(), [flows, filter]);
   const selectedFlow = selectedFlowId ? flows.find(f => f.id === selectedFlowId) : null;
 
   return (
@@ -184,6 +205,17 @@ function MainApp() {
         )}
       </div>
       <StatusBar />
+      {breakpointPause && (
+        <BreakpointPauseDialog
+          flowId={breakpointPause.flowId}
+          flow={breakpointPause.flow}
+          phase={breakpointPause.phase as 'request' | 'response'}
+          onResume={(flowId, action) => {
+            window.proxyboy?.breakpoint.resume(flowId, action);
+            setBreakpointPause(null);
+          }}
+        />
+      )}
     </div>
   );
 }

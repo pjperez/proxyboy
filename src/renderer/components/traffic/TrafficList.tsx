@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import { Virtuoso } from 'react-virtuoso';
 import TrafficRow from './TrafficRow';
 import ContextMenu from './ContextMenu';
 import type { ContextMenuItem } from './ContextMenu';
@@ -260,8 +261,9 @@ export default function TrafficList({ flows, selectedId, onSelect }: Props) {
         </div>
       </div>
       {/* Rows */}
-      <div className="flex-1 overflow-y-auto">
-        {sortedFlows.map(flow => (
+      <Virtuoso
+        data={sortedFlows}
+        itemContent={(index, flow) => (
           <TrafficRow
             key={flow.id}
             flow={flow}
@@ -271,8 +273,9 @@ export default function TrafficList({ flows, selectedId, onSelect }: Props) {
             visibleColumns={visibleColumns}
             columnKey={columnKey}
           />
-        ))}
-      </div>
+        )}
+        style={{ height: '100%', flex: 1 }}
+      />
       {/* Context Menu */}
       {contextMenu && (
         <ContextMenu

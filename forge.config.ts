@@ -10,13 +10,13 @@ const config: ForgeConfig = {
     asar: true,
     name: 'ProxyBoy',
     executableName: 'proxyboy',
-    icon: './assets/icons/icon',
+    // TODO: Add custom icon: icon: './assets/icons/icon',
   },
   rebuildConfig: {},
   makers: [
     new MakerSquirrel({
       name: 'ProxyBoy',
-      setupIcon: './assets/icons/icon.ico',
+      // TODO: Add custom installer icon: setupIcon: './assets/icons/icon.ico',
     }),
     new MakerZIP({}, ['win32']),
   ],

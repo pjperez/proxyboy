@@ -32,6 +32,7 @@ const createWindow = (): void => {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      webSecurity: true,
       sandbox: false,
     },
   });
@@ -44,6 +45,13 @@ const createWindow = (): void => {
       path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`)
     );
   }
+
+  // Block window.open and navigation away from the app
+  mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (MAIN_WINDOW_VITE_DEV_SERVER_URL && url.startsWith(MAIN_WINDOW_VITE_DEV_SERVER_URL)) return;
+    event.preventDefault();
+  });
 
   // Initialize proxy engine
   const certManager = new CertificateManager();
