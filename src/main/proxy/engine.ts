@@ -68,12 +68,63 @@ export class ProxyEngine extends EventEmitter {
     await this.certManager.initialize();
 
     this.proxy.onError((ctx, err, errorKind) => {
-      // Suppress common transient errors
-      if (errorKind === 'HTTPS_CLIENT_ERROR') return;
-      if (errorKind === 'PROXY_TO_SERVER_REQUEST_ERROR') return;
-      if ((err as any)?.code === 'ECONNRESET') return;
+      // Suppress ALL common transient errors silently
+      const suppressedKinds = [
+        'HTTPS_CLIENT_ERROR',
+        'PROXY_TO_SERVER_REQUEST_ERROR',
+        'ERR_HTTP_REQUEST_TIMEOUT',
+      ];
+      if (suppressedKinds.includes(errorKind || '')) return;
+
+      const suppressedCodes = [
+        'ECONNRESET',
+        'ECONNREFUSED',
+        'ETIMEDOUT',
+        'EPIPE',
+        'ERR_SSL_SSLV3_ALERT_CERTIFICATE_UNKNOWN',
+        'ERR_HTTP_REQUEST_TIMEOUT',
+        'HPE_HEADER_OVERFLOW',
+      ];
+      if (err && suppressedCodes.includes((err as any)?.code)) return;
+
       if (err) this.emit('proxy:error', err);
     });
+
+    // Suppress noisy console output from http-mitm-proxy internals
+    const origStderrWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (chunk: any, ...args: any[]) => {
+      const str = typeof chunk === 'string' ? chunk : chunk?.toString?.() || '';
+      if (
+        str.includes('HTTPS_CLIENT_ERROR') ||
+        str.includes('creating SNI context') ||
+        str.includes('HPE_HEADER_OVERFLOW') ||
+        str.includes('SSLV3_ALERT_CERTIFICATE_UNKNOWN') ||
+        str.includes('ERR_HTTP_REQUEST_TIMEOUT') ||
+        str.includes('Header overflow') ||
+        str.includes('ECONNRESET')
+      ) {
+        return true;
+      }
+      return origStderrWrite(chunk, ...args);
+    };
+
+    // Also suppress on stdout
+    const origStdoutWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = (chunk: any, ...args: any[]) => {
+      const str = typeof chunk === 'string' ? chunk : chunk?.toString?.() || '';
+      if (
+        str.includes('HTTPS_CLIENT_ERROR') ||
+        str.includes('creating SNI context') ||
+        str.includes('HPE_HEADER_OVERFLOW') ||
+        str.includes('SSLV3_ALERT_CERTIFICATE_UNKNOWN') ||
+        str.includes('ERR_HTTP_REQUEST_TIMEOUT') ||
+        str.includes('Header overflow') ||
+        str.includes('ECONNRESET')
+      ) {
+        return true;
+      }
+      return origStdoutWrite(chunk, ...args);
+    };
 
     this.proxy.onRequest((ctx: any, callback: () => void) => {
       const flowId = randomUUID();
