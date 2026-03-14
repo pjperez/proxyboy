@@ -5,9 +5,11 @@ import MarkdownContent from './MarkdownContent';
 
 interface Props {
   onClose: () => void;
+  onDetach?: () => void;
+  isDetached?: boolean;
 }
 
-export default function AgentPanel({ onClose }: Props) {
+export default function AgentPanel({ onClose, onDetach, isDetached }: Props) {
   const { messages, isLoading, currentStreamContent, sendMessage, clearMessages } = useAgentStore();
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -63,28 +65,39 @@ export default function AgentPanel({ onClose }: Props) {
   return (
     <div className="flex flex-col h-full bg-pb-bg">
       {/* Header */}
-      <div className="flex items-center justify-between px-3 h-10 bg-pb-surface border-b border-pb-border">
-        <div className="flex items-center gap-2">
-          <span className="text-sm">🤖</span>
-          <span className="text-xs font-semibold text-pb-text">ProxyBoy AI</span>
-          <span className="text-[10px] text-pb-text-dim px-1.5 py-0.5 bg-pb-bg rounded">Copilot</span>
+      {!isDetached && (
+        <div className="flex items-center justify-between px-3 h-10 bg-pb-surface border-b border-pb-border">
+          <div className="flex items-center gap-2">
+            <span className="text-sm">🤖</span>
+            <span className="text-xs font-semibold text-pb-text">ProxyBoy AI</span>
+            <span className="text-[10px] text-pb-text-dim px-1.5 py-0.5 bg-pb-bg rounded">Copilot</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={clearMessages}
+              className="text-pb-text-dim hover:text-pb-text text-xs px-1"
+              title="Clear chat"
+            >
+              🗑
+            </button>
+            {onDetach && (
+              <button
+                onClick={onDetach}
+                className="text-pb-text-dim hover:text-pb-text text-xs px-1"
+                title="Pop out"
+              >
+                ⧉
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              className="text-pb-text-dim hover:text-pb-text text-lg px-1"
+            >
+              ✕
+            </button>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
-          <button
-            onClick={clearMessages}
-            className="text-pb-text-dim hover:text-pb-text text-xs px-1"
-            title="Clear chat"
-          >
-            🗑
-          </button>
-          <button
-            onClick={onClose}
-            className="text-pb-text-dim hover:text-pb-text text-lg px-1"
-          >
-            ✕
-          </button>
-        </div>
-      </div>
+      )}
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3">

@@ -63,9 +63,11 @@ export default function MarkdownContent({ content }: Props) {
           },
           table({ children }) {
             return (
-              <table className="border-collapse border border-pb-border my-2 text-xs w-full">
-                {children}
-              </table>
+              <div className="overflow-x-auto my-2 rounded border border-pb-border">
+                <table className="border-collapse text-xs w-max min-w-full">
+                  {children}
+                </table>
+              </div>
             );
           },
           th({ children }) {

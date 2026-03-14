@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import TitleBar from './components/layout/TitleBar';
 import Sidebar from './components/layout/Sidebar';
 import StatusBar from './components/layout/StatusBar';
@@ -6,6 +6,7 @@ import TrafficList from './components/traffic/TrafficList';
 import TrafficDetail from './components/traffic/TrafficDetail';
 import FilterBar from './components/filters/FilterBar';
 import AgentPanel from './components/agent/AgentPanel';
+import FloatingAgentPanel from './components/agent/FloatingAgentPanel';
 import BreakpointEditor from './components/rules/BreakpointEditor';
 import MapLocalEditor from './components/rules/MapLocalEditor';
 import { useTrafficStore } from './stores/traffic';
@@ -22,7 +23,25 @@ type View = 'traffic' | 'breakpoints' | 'map-local';
 export default function App() {
   const [selectedView, setSelectedView] = useState<View>('traffic');
   const [showAgent, setShowAgent] = useState(false);
+  const [agentDetached, setAgentDetached] = useState(false);
+  const [agentWidth, setAgentWidth] = useState(384);
   const [selectedFlowId, setSelectedFlowId] = useState<string | null>(null);
+
+  const handleAgentResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = agentWidth;
+    const onMouseMove = (ev: MouseEvent) => {
+      const newWidth = Math.max(320, Math.min(800, startWidth + (startX - ev.clientX)));
+      setAgentWidth(newWidth);
+    };
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  }, [agentWidth]);
   const { flows, addFlow, updateFlow, getFilteredFlows } = useTrafficStore();
   const { proxyRunning, setProxyRunning } = useAppStore();
 
@@ -107,12 +126,28 @@ export default function App() {
           {selectedView === 'breakpoints' && <BreakpointEditor />}
           {selectedView === 'map-local' && <MapLocalEditor />}
         </div>
-        {showAgent && (
-          <div className="w-96 border-l border-pb-border overflow-hidden">
-            <AgentPanel onClose={() => setShowAgent(false)} />
+        {showAgent && !agentDetached && (
+          <div className="flex overflow-hidden" style={{ width: agentWidth }}>
+            <div
+              className="w-1 cursor-col-resize hover:bg-pb-accent/30 active:bg-pb-accent/50 transition-colors"
+              onMouseDown={handleAgentResize}
+            />
+            <div className="flex-1 border-l border-pb-border overflow-hidden">
+              <AgentPanel
+                onClose={() => setShowAgent(false)}
+                onDetach={() => setAgentDetached(true)}
+                isDetached={false}
+              />
+            </div>
           </div>
         )}
       </div>
+      {showAgent && agentDetached && (
+        <FloatingAgentPanel
+          onClose={() => setShowAgent(false)}
+          onAttach={() => setAgentDetached(false)}
+        />
+      )}
       <StatusBar />
     </div>
   );

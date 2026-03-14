@@ -58,11 +58,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const api = (window as any).proxyboy;
       if (api) {
         const result = await api.agent.sendMessage(text);
-        const content = result?.content || result?.error || get().currentStreamContent;
+        // Prefer streamed content over IPC result
+        const streamedContent = get().currentStreamContent;
+        const content = streamedContent || result?.content || result?.error || 'No response received.';
         const assistantMessage: AgentMessage = {
           id: generateId(),
           role: 'assistant',
-          content: content || 'No response received.',
+          content,
           toolCalls: [...get().toolCalls],
           timestamp: Date.now(),
         };
@@ -74,15 +76,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         }));
       }
     } catch (error: any) {
+      const streamedContent = get().currentStreamContent;
       const errorMessage: AgentMessage = {
         id: generateId(),
         role: 'assistant',
-        content: `Error: ${error.message || 'Failed to get response from agent'}`,
+        content: streamedContent || `Error: ${error.message || 'Failed to get response from agent'}`,
         timestamp: Date.now(),
       };
       set((state) => ({
         messages: [...state.messages, errorMessage],
         isLoading: false,
+        currentStreamContent: '',
       }));
     }
   },

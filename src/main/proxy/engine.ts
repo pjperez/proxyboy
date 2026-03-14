@@ -2,10 +2,25 @@ import { EventEmitter } from 'events';
 import { Proxy } from 'http-mitm-proxy';
 import type { IProxy } from 'http-mitm-proxy';
 import { randomUUID } from 'crypto';
+import { gunzipSync, inflateSync, brotliDecompressSync } from 'zlib';
 import { HttpFlow, HttpRequest, HttpResponse } from '../../shared/types';
 import { CertificateManager } from './certificate';
 import { Interceptor } from './interceptor';
 import { ProxyEngineOptions } from './types';
+
+function decompressBody(body: Buffer, encoding?: string): Buffer {
+  if (!encoding) return body;
+  const enc = encoding.toLowerCase().trim();
+  try {
+    if (enc === 'gzip' || enc === 'x-gzip') return gunzipSync(body);
+    if (enc === 'br') return brotliDecompressSync(body);
+    if (enc === 'deflate') return inflateSync(body);
+  } catch {
+    // Return raw body if decompression fails
+    return body;
+  }
+  return body;
+}
 
 export class ProxyEngine extends EventEmitter {
   private proxy: IProxy;
@@ -148,7 +163,8 @@ export class ProxyEngine extends EventEmitter {
       });
 
       ctx.onResponseEnd((ctx: any, callback: () => void) => {
-        const responseBody = responseChunks.length > 0 ? Buffer.concat(responseChunks) : undefined;
+        const rawBody = responseChunks.length > 0 ? Buffer.concat(responseChunks) : undefined;
+        const responseBody = rawBody ? decompressBody(rawBody, ctx.serverToProxyResponse?.headers?.['content-encoding']) : undefined;
         const response: HttpResponse = {
           id: randomUUID(),
           requestId: request.id,

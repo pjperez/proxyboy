@@ -168,15 +168,21 @@ export class AgentClient {
           content: SYSTEM_PROMPT + contextPrompt,
         },
         tools: this.buildTools(),
+        streaming: true,
         onPermissionRequest: this.sdk.approveAll,
       });
 
-      // Stream all events to renderer and log for debugging
+      // Stream events to renderer
       this.session.on((event: any) => {
-        console.log('[Agent] Event:', event.type);
         if (event.type === 'assistant.message_delta') {
           this.mainWindow.webContents.send(IPC_CHANNELS.AGENT_MESSAGE_DELTA, {
             content: event.data.deltaContent,
+          });
+        }
+        if (event.type === 'tool.execution_start') {
+          this.mainWindow.webContents.send(IPC_CHANNELS.AGENT_TOOL_CALL, {
+            name: event.data?.toolName || 'unknown',
+            args: event.data?.arguments || {},
           });
         }
       });
@@ -184,15 +190,49 @@ export class AgentClient {
     }
 
     console.log('[Agent] Sending message:', message.slice(0, 100));
-    const response = await this.session.sendAndWait({ prompt: message }, 120000);
-    console.log('[Agent] Response received:', !!response);
-    const content = response?.data?.content || 'No response from agent.';
 
-    this.mainWindow.webContents.send(IPC_CHANNELS.AGENT_MESSAGE_COMPLETE, {
-      content,
+    // Use event-driven streaming instead of sendAndWait
+    return new Promise<string>((resolve, reject) => {
+      let fullContent = '';
+      const timeout = setTimeout(() => {
+        cleanup();
+        resolve(fullContent || 'Response timed out.');
+      }, 120000);
+
+      const unsubMessage = this.session.on('assistant.message', (event: any) => {
+        fullContent = event.data?.content || fullContent;
+      });
+
+      const unsubDelta = this.session.on('assistant.message_delta', (event: any) => {
+        fullContent += event.data?.deltaContent || '';
+      });
+
+      const unsubIdle = this.session.on('session.idle', () => {
+        cleanup();
+        const content = fullContent || 'No response from agent.';
+        this.mainWindow.webContents.send(IPC_CHANNELS.AGENT_MESSAGE_COMPLETE, { content });
+        resolve(content);
+      });
+
+      const unsubError = this.session.on('session.error', (event: any) => {
+        cleanup();
+        reject(new Error(event.data?.message || 'Session error'));
+      });
+
+      const cleanup = () => {
+        clearTimeout(timeout);
+        unsubMessage();
+        unsubDelta();
+        unsubIdle();
+        unsubError();
+      };
+
+      // Fire and forget - events handle the rest
+      this.session.send({ prompt: message }).catch((err: any) => {
+        cleanup();
+        reject(err);
+      });
     });
-
-    return content;
   }
 
   async stop(): Promise<void> {
