@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useRef, useEffect } from 'react';
 import { useAgentStore } from '../../stores/agent';
 import AgentMessage from './AgentMessage';
 import MarkdownContent from './MarkdownContent';
@@ -10,8 +10,19 @@ interface Props {
 }
 
 export default function AgentPanel({ onClose, onDetach, isDetached }: Props) {
-  const { messages, isLoading, currentStreamContent, sendMessage, clearMessages, pendingPermissions, autoApprove, setAutoApprove, addPendingPermission, removePendingPermission } = useAgentStore();
-  const [input, setInput] = useState('');
+  const {
+    messages,
+    isLoading,
+    currentStreamContent,
+    sendMessage,
+    clearMessages,
+    pendingPermissions,
+    autoApprove,
+    draftInput,
+    setAutoApprove,
+    setDraftInput,
+    removePendingPermission,
+  } = useAgentStore();
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -51,10 +62,16 @@ export default function AgentPanel({ onClose, onDetach, isDetached }: Props) {
     };
   }, []);
 
+  useEffect(() => {
+    const api = (window as any).proxyboy;
+    if (!api) return;
+    api.agent.setAutoApprove(autoApprove);
+  }, [autoApprove]);
+
   const handleSend = async () => {
-    if (!input.trim() || isLoading) return;
-    const text = input;
-    setInput('');
+    if (!draftInput.trim() || isLoading) return;
+    const text = draftInput;
+    setDraftInput('');
     await sendMessage(text);
   };
 
@@ -91,13 +108,13 @@ export default function AgentPanel({ onClose, onDetach, isDetached }: Props) {
   return (
     <div className="flex flex-col h-full bg-pb-bg">
       {/* Header */}
-      <div className={`flex items-center justify-between px-3 bg-pb-surface border-b border-pb-border ${isDetached ? 'h-10 app-region-drag' : 'h-10'}`}>
+      <div className={`flex items-center justify-between px-3 bg-pb-surface border-b border-pb-border ${isDetached ? 'h-10 drag-region' : 'h-10'}`}>
         <div className="flex items-center gap-2">
           <span className="text-sm">🤖</span>
           <span className="text-xs font-semibold text-pb-text">ProxyBoy AI</span>
           <span className="text-[10px] text-pb-text-dim px-1.5 py-0.5 bg-pb-bg rounded">Copilot</span>
         </div>
-        <div className="flex items-center gap-1 app-region-no-drag">
+        <div className="flex items-center gap-1 no-drag">
           <button
             onClick={handleToggleAutoApprove}
             className={`text-xs px-1.5 py-0.5 rounded flex items-center gap-1 ${
@@ -150,7 +167,7 @@ export default function AgentPanel({ onClose, onDetach, isDetached }: Props) {
               {quickPrompts.map(prompt => (
                 <button
                   key={prompt}
-                  onClick={() => { setInput(prompt); }}
+                  onClick={() => { setDraftInput(prompt); }}
                   className="w-full px-3 py-2 text-xs text-left bg-pb-surface rounded-lg border border-pb-border hover:border-pb-accent/40 hover:bg-pb-surface-hover transition-colors"
                 >
                   {prompt}
@@ -218,8 +235,8 @@ export default function AgentPanel({ onClose, onDetach, isDetached }: Props) {
       <div className="p-3 border-t border-pb-border">
         <div className="flex gap-2">
           <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
+            value={draftInput}
+            onChange={(e) => setDraftInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Ask about your traffic..."
             rows={1}
@@ -227,7 +244,7 @@ export default function AgentPanel({ onClose, onDetach, isDetached }: Props) {
           />
           <button
             onClick={handleSend}
-            disabled={!input.trim() || isLoading}
+            disabled={!draftInput.trim() || isLoading}
             className="px-3 py-2 bg-pb-accent text-white text-xs rounded-lg font-medium hover:bg-pb-accent/80 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Send
