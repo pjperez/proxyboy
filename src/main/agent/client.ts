@@ -22,10 +22,24 @@ export class AgentClient {
   private ruleManager: RuleManager | null = null;
   private initialized = false;
   private sdk: any = null;
+  private autoApprove = false;
+  private pendingPermissions = new Map<string, { resolve: (value: { kind: string }) => void }>();
 
   constructor(proxyEngine: ProxyEngine, broadcast: (channel: string, data: any) => void) {
     this.proxyEngine = proxyEngine;
     this.broadcast = broadcast;
+  }
+
+  setAutoApprove(value: boolean): void {
+    this.autoApprove = value;
+  }
+
+  respondToPermission(id: string, approved: boolean): void {
+    const pending = this.pendingPermissions.get(id);
+    if (pending) {
+      pending.resolve({ kind: approved ? 'approved' : 'denied' });
+      this.pendingPermissions.delete(id);
+    }
   }
 
   setRuleManager(ruleManager: RuleManager): void {
@@ -185,7 +199,25 @@ export class AgentClient {
         },
         tools: this.buildTools(),
         streaming: true,
-        onPermissionRequest: this.sdk.approveAll,
+        onPermissionRequest: async (request: any) => {
+          if (this.autoApprove) {
+            return { kind: 'approved' };
+          }
+
+          const id = randomUUID();
+          const toolName = request?.toolName || request?.name || 'unknown';
+          const args = request?.arguments || request?.args || {};
+
+          this.broadcast(IPC_CHANNELS.AGENT_PERMISSION_REQUEST, {
+            id,
+            toolName,
+            arguments: args,
+          });
+
+          return new Promise<{ kind: string }>((resolve) => {
+            this.pendingPermissions.set(id, { resolve });
+          });
+        },
       });
 
       // Stream events to renderer

@@ -1,12 +1,13 @@
 import { create } from 'zustand';
-import type { AgentMessage, AgentToolCall } from '../../shared/types';
-import { randomUUID } from 'crypto';
+import type { AgentMessage, AgentToolCall, AgentPermissionRequest } from '../../shared/types';
 
 interface AgentState {
   messages: AgentMessage[];
   isLoading: boolean;
   currentStreamContent: string;
   toolCalls: AgentToolCall[];
+  pendingPermissions: AgentPermissionRequest[];
+  autoApprove: boolean;
   addMessage: (message: AgentMessage) => void;
   setLoading: (loading: boolean) => void;
   appendStreamContent: (content: string) => void;
@@ -14,6 +15,9 @@ interface AgentState {
   addToolCall: (toolCall: AgentToolCall) => void;
   clearMessages: () => void;
   sendMessage: (text: string) => Promise<void>;
+  addPendingPermission: (req: AgentPermissionRequest) => void;
+  removePendingPermission: (id: string) => void;
+  setAutoApprove: (value: boolean) => void;
 }
 
 function generateId(): string {
@@ -25,6 +29,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   isLoading: false,
   currentStreamContent: '',
   toolCalls: [],
+  pendingPermissions: [],
+  autoApprove: false,
 
   addMessage: (message) =>
     set((state) => ({ messages: [...state.messages, message] })),
@@ -39,7 +45,15 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   addToolCall: (toolCall) =>
     set((state) => ({ toolCalls: [...state.toolCalls, toolCall] })),
 
-  clearMessages: () => set({ messages: [], toolCalls: [] }),
+  clearMessages: () => set({ messages: [], toolCalls: [], pendingPermissions: [] }),
+
+  addPendingPermission: (req) =>
+    set((state) => ({ pendingPermissions: [...state.pendingPermissions, req] })),
+
+  removePendingPermission: (id) =>
+    set((state) => ({ pendingPermissions: state.pendingPermissions.filter(p => p.id !== id) })),
+
+  setAutoApprove: (value) => set({ autoApprove: value }),
 
   sendMessage: async (text) => {
     const userMessage: AgentMessage = {
@@ -58,9 +72,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const api = (window as any).proxyboy;
       if (api) {
         const result = await api.agent.sendMessage(text);
-        // Prefer streamed content over IPC result
         const streamedContent = get().currentStreamContent;
-        const content = streamedContent || result?.content || result?.error || 'No response received.';
+        // Use whichever is longer to avoid truncation from IPC race conditions
+        const resultContent = result?.content || result?.error || '';
+        const content = (streamedContent.length >= resultContent.length)
+          ? streamedContent
+          : (resultContent || streamedContent || 'No response received.');
         const assistantMessage: AgentMessage = {
           id: generateId(),
           role: 'assistant',

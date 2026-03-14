@@ -8,6 +8,7 @@ import FilterBar from './components/filters/FilterBar';
 import AgentPanel from './components/agent/AgentPanel';
 import BreakpointEditor from './components/rules/BreakpointEditor';
 import MapLocalEditor from './components/rules/MapLocalEditor';
+import SettingsPanel from './components/settings/SettingsPanel';
 import { useTrafficStore } from './stores/traffic';
 import { useRulesStore } from './stores/rules';
 import { useAppStore } from './stores/app';
@@ -18,7 +19,7 @@ declare global {
   }
 }
 
-type View = 'traffic' | 'breakpoints' | 'map-local';
+type View = 'traffic' | 'breakpoints' | 'map-local' | 'settings';
 
 // Detect if this is the detached agent window
 const isAgentWindow = new URLSearchParams(window.location.search).get('view') === 'agent';
@@ -164,6 +165,7 @@ function MainApp() {
           )}
           {selectedView === 'breakpoints' && <BreakpointEditor />}
           {selectedView === 'map-local' && <MapLocalEditor />}
+          {selectedView === 'settings' && <SettingsPanel />}
         </div>
         {showAgent && !agentDetached && (
           <div className="flex overflow-hidden" style={{ width: agentWidth }}>

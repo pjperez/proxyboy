@@ -125,6 +125,13 @@ export interface AgentConversation {
   updatedAt: number;
 }
 
+// Agent permission types
+export interface AgentPermissionRequest {
+  id: string;
+  toolName: string;
+  arguments: Record<string, unknown>;
+}
+
 // IPC channel types
 export interface ProxyControlMessage {
   action: 'start' | 'stop' | 'restart';

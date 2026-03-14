@@ -85,6 +85,15 @@ const api = {
       ipcRenderer.on(IPC_CHANNELS.AGENT_WINDOW_CLOSED, handler);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.AGENT_WINDOW_CLOSED, handler);
     },
+    onPermissionRequest: (callback: (data: { id: string; toolName: string; arguments: Record<string, unknown> }) => void) => {
+      const handler = (_event: any, data: any) => callback(data);
+      ipcRenderer.on(IPC_CHANNELS.AGENT_PERMISSION_REQUEST, handler);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.AGENT_PERMISSION_REQUEST, handler);
+    },
+    respondPermission: (id: string, approved: boolean) =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_PERMISSION_RESPONSE, { id, approved }),
+    setAutoApprove: (autoApprove: boolean) =>
+      ipcRenderer.invoke(IPC_CHANNELS.AGENT_SET_AUTO_APPROVE, autoApprove),
   },
 
   // App

@@ -192,6 +192,16 @@ export function registerIpcHandlers(
     return { initialized: agentClient.isInitialized() };
   });
 
+  ipcMain.handle(IPC_CHANNELS.AGENT_PERMISSION_RESPONSE, (_event, data: { id: string; approved: boolean }) => {
+    agentClient.respondToPermission(data.id, data.approved);
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_SET_AUTO_APPROVE, (_event, autoApprove: boolean) => {
+    agentClient.setAutoApprove(autoApprove);
+    return { success: true };
+  });
+
   ipcMain.handle(IPC_CHANNELS.AGENT_OPEN_WINDOW, () => {
     if (agentWindow && !agentWindow.isDestroyed()) {
       agentWindow.focus();

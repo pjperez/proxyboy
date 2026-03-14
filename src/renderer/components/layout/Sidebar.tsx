@@ -11,6 +11,7 @@ const navItems = [
   { id: 'traffic', label: 'Traffic', icon: '📡' },
   { id: 'breakpoints', label: 'Breakpoints', icon: '⏸' },
   { id: 'map-local', label: 'Map Local', icon: '📁' },
+  { id: 'settings', label: 'Settings', icon: '⚙' },
 ];
 
 export default function Sidebar({ selectedView, onSelectView, onToggleAgent, showAgent }: Props) {

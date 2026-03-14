@@ -10,13 +10,13 @@ interface Props {
 }
 
 export default function AgentPanel({ onClose, onDetach, isDetached }: Props) {
-  const { messages, isLoading, currentStreamContent, sendMessage, clearMessages } = useAgentStore();
+  const { messages, isLoading, currentStreamContent, sendMessage, clearMessages, pendingPermissions, autoApprove, setAutoApprove, addPendingPermission, removePendingPermission } = useAgentStore();
   const [input, setInput] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, currentStreamContent]);
+  }, [messages, currentStreamContent, pendingPermissions]);
 
   // Wire up streaming events
   useEffect(() => {
@@ -36,9 +36,18 @@ export default function AgentPanel({ onClose, onDetach, isDetached }: Props) {
       });
     });
 
+    const unsubPermission = api.agent.onPermissionRequest((data: any) => {
+      useAgentStore.getState().addPendingPermission({
+        id: data.id,
+        toolName: data.toolName,
+        arguments: data.arguments || {},
+      });
+    });
+
     return () => {
       unsubDelta();
       unsubTool();
+      unsubPermission();
     };
   }, []);
 
@@ -47,6 +56,23 @@ export default function AgentPanel({ onClose, onDetach, isDetached }: Props) {
     const text = input;
     setInput('');
     await sendMessage(text);
+  };
+
+  const handleToggleAutoApprove = () => {
+    const newValue = !autoApprove;
+    setAutoApprove(newValue);
+    const api = (window as any).proxyboy;
+    if (api) {
+      api.agent.setAutoApprove(newValue);
+    }
+  };
+
+  const handlePermissionResponse = (id: string, approved: boolean) => {
+    removePendingPermission(id);
+    const api = (window as any).proxyboy;
+    if (api) {
+      api.agent.respondPermission(id, approved);
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -72,6 +98,18 @@ export default function AgentPanel({ onClose, onDetach, isDetached }: Props) {
           <span className="text-[10px] text-pb-text-dim px-1.5 py-0.5 bg-pb-bg rounded">Copilot</span>
         </div>
         <div className="flex items-center gap-1 app-region-no-drag">
+          <button
+            onClick={handleToggleAutoApprove}
+            className={`text-xs px-1.5 py-0.5 rounded flex items-center gap-1 ${
+              autoApprove
+                ? 'bg-pb-warning/20 text-pb-warning'
+                : 'bg-pb-success/20 text-pb-success'
+            }`}
+            title={autoApprove ? 'Auto-approve tools: ON (click to require permission)' : 'Ask permission: ON (click to auto-approve)'}
+          >
+            <span>{autoApprove ? '🔓' : '🔒'}</span>
+            <span className="text-[10px]">{autoApprove ? 'Auto' : 'Ask'}</span>
+          </button>
           <button
             onClick={clearMessages}
             className="text-pb-text-dim hover:text-pb-text text-xs px-1"
@@ -143,6 +181,35 @@ export default function AgentPanel({ onClose, onDetach, isDetached }: Props) {
             Thinking...
           </div>
         )}
+
+        {pendingPermissions.map(req => (
+          <div key={req.id} className="bg-pb-warning/10 border border-pb-warning/30 rounded-lg p-3 text-xs">
+            <div className="flex items-center gap-2 mb-2">
+              <span>🔧</span>
+              <span className="font-mono font-medium">{req.toolName}</span>
+              <span className="text-pb-text-dim">wants to execute</span>
+            </div>
+            {Object.keys(req.arguments).length > 0 && (
+              <pre className="bg-pb-bg rounded p-2 mb-2 text-[10px] overflow-x-auto">
+                {JSON.stringify(req.arguments, null, 2)}
+              </pre>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={() => handlePermissionResponse(req.id, true)}
+                className="px-3 py-1 bg-pb-success/20 text-pb-success rounded hover:bg-pb-success/30 transition-colors"
+              >
+                ✅ Approve
+              </button>
+              <button
+                onClick={() => handlePermissionResponse(req.id, false)}
+                className="px-3 py-1 bg-pb-error/20 text-pb-error rounded hover:bg-pb-error/30 transition-colors"
+              >
+                ❌ Deny
+              </button>
+            </div>
+          </div>
+        ))}
 
         <div ref={messagesEndRef} />
       </div>
