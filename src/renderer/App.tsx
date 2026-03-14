@@ -6,10 +6,10 @@ import TrafficList from './components/traffic/TrafficList';
 import TrafficDetail from './components/traffic/TrafficDetail';
 import FilterBar from './components/filters/FilterBar';
 import AgentPanel from './components/agent/AgentPanel';
-import FloatingAgentPanel from './components/agent/FloatingAgentPanel';
 import BreakpointEditor from './components/rules/BreakpointEditor';
 import MapLocalEditor from './components/rules/MapLocalEditor';
 import { useTrafficStore } from './stores/traffic';
+import { useRulesStore } from './stores/rules';
 import { useAppStore } from './stores/app';
 
 declare global {
@@ -20,7 +20,21 @@ declare global {
 
 type View = 'traffic' | 'breakpoints' | 'map-local';
 
+// Detect if this is the detached agent window
+const isAgentWindow = new URLSearchParams(window.location.search).get('view') === 'agent';
+
 export default function App() {
+  if (isAgentWindow) {
+    return (
+      <div className="flex flex-col h-screen w-screen overflow-hidden bg-pb-bg">
+        <AgentPanel onClose={() => window.close()} isDetached={true} />
+      </div>
+    );
+  }
+  return <MainApp />;
+}
+
+function MainApp() {
   const [selectedView, setSelectedView] = useState<View>('traffic');
   const [showAgent, setShowAgent] = useState(false);
   const [agentDetached, setAgentDetached] = useState(false);
@@ -42,7 +56,15 @@ export default function App() {
     document.addEventListener('mousemove', onMouseMove);
     document.addEventListener('mouseup', onMouseUp);
   }, [agentWidth]);
+
+  const handleDetach = useCallback(async () => {
+    await window.proxyboy?.agent.openWindow();
+    setAgentDetached(true);
+    setShowAgent(false);
+  }, []);
+
   const { flows, addFlow, updateFlow, getFilteredFlows } = useTrafficStore();
+  const { addRule } = useRulesStore();
   const { proxyRunning, setProxyRunning } = useAppStore();
 
   useEffect(() => {
@@ -52,9 +74,14 @@ export default function App() {
     const unsubNew = api.traffic.onNewFlow((flow: any) => {
       addFlow(flow);
     });
-
     const unsubComplete = api.traffic.onFlowComplete((flow: any) => {
       updateFlow(flow);
+    });
+    const unsubRuleCreated = api.rules?.onRuleCreated?.((rule: any) => {
+      addRule(rule);
+    });
+    const unsubAgentClosed = api.agent.onWindowClosed(() => {
+      setAgentDetached(false);
     });
 
     api.proxy.getStatus().then((status: any) => {
@@ -67,6 +94,8 @@ export default function App() {
     return () => {
       unsubNew();
       unsubComplete();
+      unsubRuleCreated?.();
+      unsubAgentClosed();
     };
   }, []);
 
@@ -75,7 +104,11 @@ export default function App() {
     const handler = (e: KeyboardEvent) => {
       if (e.ctrlKey && e.shiftKey && e.key === 'A') {
         e.preventDefault();
-        setShowAgent(prev => !prev);
+        if (agentDetached) {
+          window.proxyboy?.agent.openWindow();
+        } else {
+          setShowAgent(prev => !prev);
+        }
       }
       if (e.ctrlKey && e.key === 'k') {
         e.preventDefault();
@@ -85,7 +118,7 @@ export default function App() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, []);
+  }, [agentDetached]);
 
   const filteredFlows = getFilteredFlows();
   const selectedFlow = selectedFlowId ? flows.find(f => f.id === selectedFlowId) : null;
@@ -97,8 +130,14 @@ export default function App() {
         <Sidebar
           selectedView={selectedView}
           onSelectView={setSelectedView}
-          onToggleAgent={() => setShowAgent(!showAgent)}
-          showAgent={showAgent}
+          onToggleAgent={() => {
+            if (agentDetached) {
+              window.proxyboy?.agent.openWindow();
+            } else {
+              setShowAgent(!showAgent);
+            }
+          }}
+          showAgent={showAgent || agentDetached}
         />
         <div className="flex flex-col flex-1 overflow-hidden">
           {selectedView === 'traffic' && (
@@ -135,19 +174,13 @@ export default function App() {
             <div className="flex-1 border-l border-pb-border overflow-hidden">
               <AgentPanel
                 onClose={() => setShowAgent(false)}
-                onDetach={() => setAgentDetached(true)}
+                onDetach={handleDetach}
                 isDetached={false}
               />
             </div>
           </div>
         )}
       </div>
-      {showAgent && agentDetached && (
-        <FloatingAgentPanel
-          onClose={() => setShowAgent(false)}
-          onAttach={() => setAgentDetached(false)}
-        />
-      )}
       <StatusBar />
     </div>
   );

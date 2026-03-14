@@ -1,4 +1,5 @@
 import { ipcMain, BrowserWindow, dialog } from 'electron';
+import * as path from 'path';
 import { IPC_CHANNELS } from '../../shared/constants';
 import { ProxyEngine } from '../proxy/engine';
 import { CertificateManager } from '../proxy/certificate';
@@ -10,23 +11,30 @@ import { randomUUID } from 'crypto';
 import { saveFlow, clearAllFlows, saveRule, getRules, deleteRule as dbDeleteRule } from '../storage/queries';
 import * as fs from 'fs';
 
+declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
+declare const MAIN_WINDOW_VITE_NAME: string;
+
 export function registerIpcHandlers(
   mainWindow: BrowserWindow,
   proxyEngine: ProxyEngine,
   certManager: CertificateManager,
 ): void {
-  const agentClient = new AgentClient(proxyEngine, mainWindow);
+  let agentWindow: BrowserWindow | null = null;
+
+  // Broadcast to all windows that care about agent events
+  const broadcastAgent = (channel: string, data: any) => {
+    if (!mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(channel, data);
+    }
+    if (agentWindow && !agentWindow.isDestroyed()) {
+      agentWindow.webContents.send(channel, data);
+    }
+  };
+
+  const agentClient = new AgentClient(proxyEngine, broadcastAgent);
+
   // Proxy control
   ipcMain.handle(IPC_CHANNELS.PROXY_START, async (_event, port?: number) => {
-    try {
-      await proxyEngine.start();
-      return { success: true, port: proxyEngine.getPort() };
-    } catch (error: any) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.PROXY_STOP, async () => {
     await proxyEngine.stop();
     return { success: true };
   });
@@ -100,6 +108,15 @@ export function registerIpcHandlers(
     console.error('Failed to load rules from database:', err);
   }
 
+  agentClient.setRuleManager({
+    createRule(rule: Rule) {
+      rules.set(rule.id, rule);
+      proxyEngine.getInterceptor().setRules(Array.from(rules.values()));
+      saveRule(rule);
+      mainWindow.webContents.send(IPC_CHANNELS.RULES_CREATED, rule);
+    },
+  });
+
   ipcMain.handle(IPC_CHANNELS.RULES_GET_ALL, () => {
     return Array.from(rules.values());
   });
@@ -164,6 +181,60 @@ export function registerIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.AGENT_STATUS, () => {
     return { initialized: agentClient.isInitialized() };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_OPEN_WINDOW, () => {
+    if (agentWindow && !agentWindow.isDestroyed()) {
+      agentWindow.focus();
+      return { success: true };
+    }
+
+    agentWindow = new BrowserWindow({
+      width: 520,
+      height: 720,
+      minWidth: 380,
+      minHeight: 400,
+      title: 'ProxyBoy AI',
+      titleBarStyle: 'hidden',
+      titleBarOverlay: {
+        color: '#1a1b26',
+        symbolColor: '#c0caf5',
+        height: 36,
+      },
+      backgroundColor: '#1a1b26',
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.js'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: false,
+      },
+    });
+
+    if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+      agentWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL + '?view=agent');
+    } else {
+      agentWindow.loadFile(
+        path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
+        { query: { view: 'agent' } },
+      );
+    }
+
+    agentWindow.on('closed', () => {
+      agentWindow = null;
+      if (!mainWindow.isDestroyed()) {
+        mainWindow.webContents.send(IPC_CHANNELS.AGENT_WINDOW_CLOSED);
+      }
+    });
+
+    return { success: true };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.AGENT_CLOSE_WINDOW, () => {
+    if (agentWindow && !agentWindow.isDestroyed()) {
+      agentWindow.close();
+      agentWindow = null;
+    }
+    return { success: true };
   });
 
   // App

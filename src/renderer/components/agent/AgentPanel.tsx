@@ -65,39 +65,39 @@ export default function AgentPanel({ onClose, onDetach, isDetached }: Props) {
   return (
     <div className="flex flex-col h-full bg-pb-bg">
       {/* Header */}
-      {!isDetached && (
-        <div className="flex items-center justify-between px-3 h-10 bg-pb-surface border-b border-pb-border">
-          <div className="flex items-center gap-2">
-            <span className="text-sm">🤖</span>
-            <span className="text-xs font-semibold text-pb-text">ProxyBoy AI</span>
-            <span className="text-[10px] text-pb-text-dim px-1.5 py-0.5 bg-pb-bg rounded">Copilot</span>
-          </div>
-          <div className="flex items-center gap-1">
+      <div className={`flex items-center justify-between px-3 bg-pb-surface border-b border-pb-border ${isDetached ? 'h-10 app-region-drag' : 'h-10'}`}>
+        <div className="flex items-center gap-2">
+          <span className="text-sm">🤖</span>
+          <span className="text-xs font-semibold text-pb-text">ProxyBoy AI</span>
+          <span className="text-[10px] text-pb-text-dim px-1.5 py-0.5 bg-pb-bg rounded">Copilot</span>
+        </div>
+        <div className="flex items-center gap-1 app-region-no-drag">
+          <button
+            onClick={clearMessages}
+            className="text-pb-text-dim hover:text-pb-text text-xs px-1"
+            title="Clear chat"
+          >
+            🗑
+          </button>
+          {!isDetached && onDetach && (
             <button
-              onClick={clearMessages}
+              onClick={onDetach}
               className="text-pb-text-dim hover:text-pb-text text-xs px-1"
-              title="Clear chat"
+              title="Pop out to separate window"
             >
-              🗑
+              ⧉
             </button>
-            {onDetach && (
-              <button
-                onClick={onDetach}
-                className="text-pb-text-dim hover:text-pb-text text-xs px-1"
-                title="Pop out"
-              >
-                ⧉
-              </button>
-            )}
+          )}
+          {!isDetached && (
             <button
               onClick={onClose}
               className="text-pb-text-dim hover:text-pb-text text-lg px-1"
             >
               ✕
             </button>
-          </div>
+          )}
         </div>
-      )}
+      </div>
 
       {/* Messages */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3">

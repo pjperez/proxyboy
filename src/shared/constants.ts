@@ -22,6 +22,7 @@ export const IPC_CHANNELS = {
   RULES_UPDATE: 'rules:update',
   RULES_DELETE: 'rules:delete',
   RULES_TOGGLE: 'rules:toggle',
+  RULES_CREATED: 'rules:created',
   
   // Breakpoint
   BREAKPOINT_PAUSED: 'breakpoint:paused',
@@ -33,6 +34,9 @@ export const IPC_CHANNELS = {
   AGENT_MESSAGE_COMPLETE: 'agent:message-complete',
   AGENT_TOOL_CALL: 'agent:tool-call',
   AGENT_STATUS: 'agent:status',
+  AGENT_OPEN_WINDOW: 'agent:open-window',
+  AGENT_CLOSE_WINDOW: 'agent:close-window',
+  AGENT_WINDOW_CLOSED: 'agent:window-closed',
   
   // App
   APP_GET_VERSION: 'app:get-version',

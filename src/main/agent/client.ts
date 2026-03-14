@@ -4,24 +4,32 @@ async function loadSdk() {
   return sdk;
 }
 
-import { BrowserWindow } from 'electron';
 import { ProxyEngine } from '../proxy/engine';
 import { SYSTEM_PROMPT, buildContextPrompt } from './prompts';
 import { IPC_CHANNELS } from '../../shared/constants';
-import { HttpFlow } from '../../shared/types';
+import { HttpFlow, Rule, BreakpointRule, MapLocalRule } from '../../shared/types';
 import { randomUUID } from 'crypto';
+
+export interface RuleManager {
+  createRule(rule: Rule): void;
+}
 
 export class AgentClient {
   private client: any = null;
   private session: any = null;
   private proxyEngine: ProxyEngine;
-  private mainWindow: BrowserWindow;
+  private broadcast: (channel: string, data: any) => void;
+  private ruleManager: RuleManager | null = null;
   private initialized = false;
   private sdk: any = null;
 
-  constructor(proxyEngine: ProxyEngine, mainWindow: BrowserWindow) {
+  constructor(proxyEngine: ProxyEngine, broadcast: (channel: string, data: any) => void) {
     this.proxyEngine = proxyEngine;
-    this.mainWindow = mainWindow;
+    this.broadcast = broadcast;
+  }
+
+  setRuleManager(ruleManager: RuleManager): void {
+    this.ruleManager = ruleManager;
   }
 
   async initialize(): Promise<void> {
@@ -120,8 +128,12 @@ export class AgentClient {
         description: 'Create a breakpoint rule to pause matching traffic',
         parameters: { type: 'object', properties: { name: { type: 'string' }, urlPattern: { type: 'string' }, breakOn: { type: 'string', enum: ['request', 'response', 'both'] } }, required: ['name', 'urlPattern'] },
         handler: async (args: any) => {
-          const rule = { id: randomUUID(), type: 'breakpoint' as const, name: args.name, enabled: true, matchCriteria: { urlPattern: args.urlPattern }, breakOn: args.breakOn || 'both', createdAt: Date.now(), updatedAt: Date.now() };
-          engine.getInterceptor().setRules([rule]);
+          const rule: BreakpointRule = { id: randomUUID(), type: 'breakpoint' as const, name: args.name, enabled: true, matchCriteria: { urlPattern: args.urlPattern }, breakOn: args.breakOn || 'both', createdAt: Date.now(), updatedAt: Date.now() };
+          if (this.ruleManager) {
+            this.ruleManager.createRule(rule);
+          } else {
+            engine.getInterceptor().setRules([rule]);
+          }
           return { success: true, rule };
         },
       }),
@@ -129,8 +141,12 @@ export class AgentClient {
         description: 'Create a rule to serve a local file instead of forwarding the request',
         parameters: { type: 'object', properties: { name: { type: 'string' }, urlPattern: { type: 'string' }, localFilePath: { type: 'string' }, statusCode: { type: 'number' } }, required: ['name', 'urlPattern', 'localFilePath'] },
         handler: async (args: any) => {
-          const rule = { id: randomUUID(), type: 'map-local' as const, name: args.name, enabled: true, matchCriteria: { urlPattern: args.urlPattern }, localFilePath: args.localFilePath, statusCode: args.statusCode || 200, createdAt: Date.now(), updatedAt: Date.now() };
-          engine.getInterceptor().setRules([rule]);
+          const rule: MapLocalRule = { id: randomUUID(), type: 'map-local' as const, name: args.name, enabled: true, matchCriteria: { urlPattern: args.urlPattern }, localFilePath: args.localFilePath, statusCode: args.statusCode || 200, createdAt: Date.now(), updatedAt: Date.now() };
+          if (this.ruleManager) {
+            this.ruleManager.createRule(rule);
+          } else {
+            engine.getInterceptor().setRules([rule]);
+          }
           return { success: true, rule };
         },
       }),
@@ -175,12 +191,12 @@ export class AgentClient {
       // Stream events to renderer
       this.session.on((event: any) => {
         if (event.type === 'assistant.message_delta') {
-          this.mainWindow.webContents.send(IPC_CHANNELS.AGENT_MESSAGE_DELTA, {
+          this.broadcast(IPC_CHANNELS.AGENT_MESSAGE_DELTA, {
             content: event.data.deltaContent,
           });
         }
         if (event.type === 'tool.execution_start') {
-          this.mainWindow.webContents.send(IPC_CHANNELS.AGENT_TOOL_CALL, {
+          this.broadcast(IPC_CHANNELS.AGENT_TOOL_CALL, {
             name: event.data?.toolName || 'unknown',
             args: event.data?.arguments || {},
           });
@@ -210,7 +226,7 @@ export class AgentClient {
       const unsubIdle = this.session.on('session.idle', () => {
         cleanup();
         const content = fullContent || 'No response from agent.';
-        this.mainWindow.webContents.send(IPC_CHANNELS.AGENT_MESSAGE_COMPLETE, { content });
+        this.broadcast(IPC_CHANNELS.AGENT_MESSAGE_COMPLETE, { content });
         resolve(content);
       });
 

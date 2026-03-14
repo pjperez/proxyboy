@@ -40,6 +40,11 @@ const api = {
     update: (rule: Rule) => ipcRenderer.invoke(IPC_CHANNELS.RULES_UPDATE, rule),
     delete: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.RULES_DELETE, id),
     toggle: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.RULES_TOGGLE, id),
+    onRuleCreated: (callback: (rule: Rule) => void) => {
+      const handler = (_event: any, rule: Rule) => callback(rule);
+      ipcRenderer.on(IPC_CHANNELS.RULES_CREATED, handler);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.RULES_CREATED, handler);
+    },
   },
 
   // Breakpoint
@@ -73,6 +78,13 @@ const api = {
       return () => ipcRenderer.removeListener(IPC_CHANNELS.AGENT_TOOL_CALL, handler);
     },
     getStatus: () => ipcRenderer.invoke(IPC_CHANNELS.AGENT_STATUS),
+    openWindow: () => ipcRenderer.invoke(IPC_CHANNELS.AGENT_OPEN_WINDOW),
+    closeWindow: () => ipcRenderer.invoke(IPC_CHANNELS.AGENT_CLOSE_WINDOW),
+    onWindowClosed: (callback: () => void) => {
+      const handler = () => callback();
+      ipcRenderer.on(IPC_CHANNELS.AGENT_WINDOW_CLOSED, handler);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.AGENT_WINDOW_CLOSED, handler);
+    },
   },
 
   // App
