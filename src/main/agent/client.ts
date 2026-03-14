@@ -210,10 +210,13 @@ export class AgentClient {
     // Use event-driven streaming instead of sendAndWait
     return new Promise<string>((resolve, reject) => {
       let fullContent = '';
+      // Safety net — only fires if session.idle never comes
       const timeout = setTimeout(() => {
         cleanup();
-        resolve(fullContent || 'Response timed out.');
-      }, 120000);
+        const content = fullContent || 'No response from agent.';
+        this.broadcast(IPC_CHANNELS.AGENT_MESSAGE_COMPLETE, { content });
+        resolve(content);
+      }, 300000);
 
       const unsubMessage = this.session.on('assistant.message', (event: any) => {
         fullContent = event.data?.content || fullContent;
