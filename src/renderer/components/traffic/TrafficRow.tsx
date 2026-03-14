@@ -8,6 +8,8 @@ interface Props {
   onClick: () => void;
   onContextMenu?: (e: React.MouseEvent, flow: HttpFlow) => void;
   visibleColumns: Set<ColumnKey>;
+  /** Stable string key for memo comparison (avoids Set reference issues) */
+  columnKey?: string;
 }
 
 function getMethodColor(method: string): string {
@@ -59,7 +61,7 @@ function getContentType(headers?: Record<string, any>): string {
   return ct.split(';')[0].split('/').pop() || '—';
 }
 
-export default function TrafficRow({ flow, selected, onClick, onContextMenu, visibleColumns }: Props) {
+function TrafficRowInner({ flow, selected, onClick, onContextMenu, visibleColumns }: Props) {
   const pathPart = flow.request.url.replace(/^https?:\/\/[^/]+/, '');
   const v = visibleColumns;
 
@@ -118,3 +120,14 @@ export default function TrafficRow({ flow, selected, onClick, onContextMenu, vis
     </div>
   );
 }
+
+const TrafficRow = React.memo(TrafficRowInner, (prev, next) => {
+  return (
+    prev.flow === next.flow &&
+    prev.selected === next.selected &&
+    prev.onClick === next.onClick &&
+    prev.columnKey === next.columnKey
+  );
+});
+
+export default TrafficRow;

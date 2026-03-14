@@ -129,15 +129,18 @@ export default function TrafficList({ flows, selectedId, onSelect }: Props) {
     setVisibleColumns(prev => {
       const next = new Set(prev);
       if (next.has(key)) {
-        if (next.size <= 2) return prev; // keep at least 2 columns
+        if (next.size <= 2) return prev;
         next.delete(key);
       } else {
         next.add(key);
       }
-      saveVisibleColumns(next);
       return next;
     });
   }, []);
+
+  // Persist column visibility outside of state updater to avoid sync IO during render
+  const columnKey = useMemo(() => [...visibleColumns].sort().join(','), [visibleColumns]);
+  useEffect(() => { saveVisibleColumns(visibleColumns); }, [columnKey]);
 
   const activeColumns = useMemo(
     () => ALL_COLUMNS.filter(c => visibleColumns.has(c.key)),
@@ -266,6 +269,7 @@ export default function TrafficList({ flows, selectedId, onSelect }: Props) {
             onClick={() => onSelect(flow.id)}
             onContextMenu={handleContextMenu}
             visibleColumns={visibleColumns}
+            columnKey={columnKey}
           />
         ))}
       </div>
