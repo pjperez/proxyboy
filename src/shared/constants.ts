@@ -37,6 +37,7 @@ export const IPC_CHANNELS = {
   // App
   APP_GET_VERSION: 'app:get-version',
   APP_EXPORT_HAR: 'app:export-har',
+  APP_IMPORT_HAR: 'app:import-har',
 } as const;
 
 export const DEFAULT_PROXY_PORT = 9090;

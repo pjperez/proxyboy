@@ -79,6 +79,7 @@ const api = {
   app: {
     getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.APP_GET_VERSION),
     exportHar: (flowIds?: string[]) => ipcRenderer.invoke(IPC_CHANNELS.APP_EXPORT_HAR, flowIds),
+    importHar: () => ipcRenderer.invoke(IPC_CHANNELS.APP_IMPORT_HAR),
   },
 };
 

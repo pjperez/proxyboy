@@ -7,6 +7,7 @@ export default function StatusBar() {
   const { flows } = useTrafficStore();
   const [certInstalled, setCertInstalled] = useState<boolean | null>(null);
   const [certInstalling, setCertInstalling] = useState(false);
+  const [isSystemProxy, setIsSystemProxy] = useState(false);
 
   const errorCount = flows.filter(f => f.response && f.response.statusCode >= 400).length;
 
@@ -14,12 +15,23 @@ export default function StatusBar() {
     window.proxyboy?.proxy.getCertStatus().then((s: any) => {
       setCertInstalled(s.installed);
     });
+    if (proxyRunning) {
+      window.proxyboy?.proxy.getStatus().then((s: any) => {
+        setIsSystemProxy(!!s?.isSystemProxy);
+      });
+    } else {
+      setIsSystemProxy(false);
+    }
   }, [proxyRunning]);
 
   const toggleProxy = async () => {
     const api = window.proxyboy;
     if (!api) return;
     if (proxyRunning) {
+      if (isSystemProxy) {
+        await api.proxy.setSystemProxy(false);
+        setIsSystemProxy(false);
+      }
       await api.proxy.stop();
       useAppStore.getState().setProxyRunning(false);
     } else {
@@ -81,7 +93,42 @@ export default function StatusBar() {
           </button>
         </>
       )}
+      {proxyRunning && (
+        <>
+          <span className="mx-3 text-pb-border">|</span>
+          <button
+            onClick={async () => {
+              const newState = !isSystemProxy;
+              const result = await window.proxyboy?.proxy.setSystemProxy(newState);
+              if (result?.success) setIsSystemProxy(newState);
+            }}
+            className={`flex items-center gap-1 transition-colors ${
+              isSystemProxy ? 'text-pb-accent' : 'text-pb-text-dim hover:text-pb-text'
+            }`}
+          >
+            🌐 {isSystemProxy ? 'System Proxy: ON' : 'System Proxy: OFF'}
+          </button>
+        </>
+      )}
       <div className="flex-1" />
+      <button
+        onClick={() => window.proxyboy?.app.exportHar()}
+        className="text-pb-text-dim hover:text-pb-text transition-colors"
+        title="Export HAR"
+      >
+        📤 Export
+      </button>
+      <span className="mx-2 text-pb-border">|</span>
+      <button
+        onClick={async () => {
+          await window.proxyboy?.app.importHar();
+        }}
+        className="text-pb-text-dim hover:text-pb-text transition-colors"
+        title="Import HAR"
+      >
+        📥 Import
+      </button>
+      <span className="mx-2 text-pb-border">|</span>
       <span className="text-pb-text-dim">Ctrl+Shift+A for AI</span>
     </div>
   );

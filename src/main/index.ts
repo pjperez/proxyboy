@@ -4,6 +4,7 @@ import { ProxyEngine } from './proxy/engine';
 import { CertificateManager } from './proxy/certificate';
 import { registerIpcHandlers } from './ipc/handlers';
 import { initDatabase, closeDatabase } from './storage/database';
+import { clearSystemProxy } from './utils/windows-proxy';
 import { DEFAULT_PROXY_PORT, DEFAULT_PROXY_HOST } from '../shared/constants';
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
@@ -71,6 +72,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', async () => {
+  try { await clearSystemProxy(); } catch {}
   if (proxyEngine?.isRunning()) {
     await proxyEngine.stop();
   }
