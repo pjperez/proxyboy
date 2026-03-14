@@ -102,6 +102,11 @@ const api = {
     exportHar: (flowIds?: string[]) => ipcRenderer.invoke(IPC_CHANNELS.APP_EXPORT_HAR, flowIds),
     importHar: () => ipcRenderer.invoke(IPC_CHANNELS.APP_IMPORT_HAR),
   },
+
+  // Debug
+  debug: {
+    getInterceptorState: () => ipcRenderer.invoke('debug:interceptor-state'),
+  },
 };
 
 export type ProxyBoyAPI = typeof api;

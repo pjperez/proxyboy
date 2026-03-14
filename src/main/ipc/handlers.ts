@@ -177,6 +177,14 @@ export function registerIpcHandlers(
     return { success: true };
   });
 
+  // Debug: inspect interceptor state
+  ipcMain.handle('debug:interceptor-state', () => {
+    return {
+      breakpointRules: proxyEngine.getInterceptor().getBreakpointRulesDebug(),
+      ruleCount: proxyEngine.getInterceptor().getBreakpointRuleCount(),
+    };
+  });
+
   // Agent
   ipcMain.handle(IPC_CHANNELS.AGENT_SEND_MESSAGE, async (_event, data: { message: string; conversationId?: string }) => {
     try {

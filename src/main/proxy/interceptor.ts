@@ -16,6 +16,18 @@ export class Interceptor {
     this.mapLocalRules = rules.filter((r): r is MapLocalRule => r.type === 'map-local' && r.enabled);
   }
 
+  getBreakpointRuleCount(): number {
+    return this.breakpointRules.length;
+  }
+
+  getBreakpointRulesDebug(): Array<{ name: string; pattern: string; breakOn: string }> {
+    return this.breakpointRules.map(r => ({
+      name: r.name,
+      pattern: r.matchCriteria.urlPattern,
+      breakOn: r.breakOn,
+    }));
+  }
+
   matchesUrl(pattern: string, url: string, isRegex?: boolean): boolean {
     if (isRegex) {
       if (pattern.length > 500) return false;
