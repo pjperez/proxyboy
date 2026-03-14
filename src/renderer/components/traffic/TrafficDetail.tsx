@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import RequestView from './RequestView';
 import ResponseView from './ResponseView';
 import type { HttpFlow } from '../../../shared/types';
@@ -8,16 +8,34 @@ interface Props {
   onClose: () => void;
 }
 
-type Tab = 'request' | 'response' | 'timing';
+type Tab = 'request' | 'response' | 'preview' | 'timing';
+
+function isImageFlow(flow: HttpFlow): boolean {
+  const ct = flow.response?.headers?.['content-type'];
+  return ct ? String(ct).toLowerCase().startsWith('image/') : false;
+}
 
 export default function TrafficDetail({ flow, onClose }: Props) {
-  const [tab, setTab] = useState<Tab>('request');
+  const hasPreview = isImageFlow(flow);
+  const [tab, setTab] = useState<Tab>(hasPreview ? 'preview' : 'request');
 
-  const tabs: { id: Tab; label: string }[] = [
-    { id: 'request', label: 'Request' },
-    { id: 'response', label: 'Response' },
-    { id: 'timing', label: 'Timing' },
+  const tabs: { id: Tab; label: string; show: boolean }[] = [
+    { id: 'request', label: 'Request', show: true },
+    { id: 'response', label: 'Response', show: true },
+    { id: 'preview', label: '🖼 Preview', show: hasPreview },
+    { id: 'timing', label: 'Timing', show: true },
   ];
+
+  const imageDataUrl = useMemo(() => {
+    if (!hasPreview || !flow.response?.body) return null;
+    const ct = String(flow.response.headers['content-type']).split(';')[0].trim();
+    const body = String(flow.response.body);
+    // Check if body is already base64 (from sanitizeFlow)
+    if ((flow.response as any)._isBase64) {
+      return `data:${ct};base64,${body}`;
+    }
+    return null;
+  }, [flow, hasPreview]);
 
   return (
     <div className="flex flex-col h-full">
@@ -39,7 +57,7 @@ export default function TrafficDetail({ flow, onClose }: Props) {
 
       {/* Tabs */}
       <div className="flex border-b border-pb-border">
-        {tabs.map(t => (
+        {tabs.filter(t => t.show).map(t => (
           <button
             key={t.id}
             onClick={() => setTab(t.id)}
@@ -59,6 +77,29 @@ export default function TrafficDetail({ flow, onClose }: Props) {
         {tab === 'response' && flow.response && <ResponseView response={flow.response} />}
         {tab === 'response' && !flow.response && (
           <div className="text-pb-text-dim text-sm">Waiting for response...</div>
+        )}
+        {tab === 'preview' && imageDataUrl && (
+          <div className="flex flex-col items-center gap-4">
+            <div
+              className="rounded border border-pb-border p-2 max-w-full"
+              style={{
+                backgroundImage:
+                  'linear-gradient(45deg, #2a2b3d 25%, transparent 25%, transparent 75%, #2a2b3d 75%), linear-gradient(45deg, #2a2b3d 25%, transparent 25%, transparent 75%, #2a2b3d 75%)',
+                backgroundSize: '16px 16px',
+                backgroundPosition: '0 0, 8px 8px',
+              }}
+            >
+              <img
+                src={imageDataUrl}
+                className="max-w-full max-h-[60vh] object-contain"
+                alt="Response image"
+              />
+            </div>
+            <div className="text-xs text-pb-text-dim space-y-1 text-center">
+              <div>{String(flow.response?.headers['content-type'] || '')} • {flow.response?.bodySize} bytes</div>
+              <div className="font-mono text-[10px] text-pb-text-dim break-all max-w-md">{flow.request.url}</div>
+            </div>
+          </div>
         )}
         {tab === 'timing' && (
           <div className="space-y-3">

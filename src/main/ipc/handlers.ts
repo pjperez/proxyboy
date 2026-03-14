@@ -35,6 +35,15 @@ export function registerIpcHandlers(
 
   // Proxy control
   ipcMain.handle(IPC_CHANNELS.PROXY_START, async (_event, port?: number) => {
+    try {
+      await proxyEngine.start();
+      return { success: true, port: proxyEngine.getPort() };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PROXY_STOP, async () => {
     await proxyEngine.stop();
     return { success: true };
   });
