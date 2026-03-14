@@ -90,39 +90,58 @@ export class ProxyEngine extends EventEmitter {
       if (err) this.emit('proxy:error', err);
     });
 
-    // Suppress noisy console output from http-mitm-proxy internals
-    const origStderrWrite = process.stderr.write.bind(process.stderr);
-    process.stderr.write = (chunk: any, ...args: any[]) => {
+    // Suppress noisy console output from http-mitm-proxy internals.
+    // The library writes errors as multiple separate write() calls (kind, then
+    // Error object, then stack frames). We use a time-window approach: when a
+    // trigger pattern is seen, suppress ALL output for 200ms to catch the
+    // trailing stack trace that follows.
+    const NOISE_PATTERNS = [
+      'HTTPS_CLIENT_ERROR',
+      'creating SNI context',
+      'HPE_HEADER_OVERFLOW',
+      'SSLV3_ALERT_CERTIFICATE_UNKNOWN',
+      'ERR_HTTP_REQUEST_TIMEOUT',
+      'Header overflow',
+      'ECONNRESET',
+      'ECONNREFUSED',
+      'ETIMEDOUT',
+      'EPIPE',
+      'Socket error',
+      'Got ECONNRESET',
+      'https server started',
+      'SNI enabled',
+      'ERR_SSL_',
+      'OPENSSL_internal',
+      'Parse Error:',
+    ];
+    let suppressUntil = 0;
+
+    const shouldSuppressWrite = (chunk: any): boolean => {
+      const now = Date.now();
       const str = typeof chunk === 'string' ? chunk : chunk?.toString?.() || '';
-      if (
-        str.includes('HTTPS_CLIENT_ERROR') ||
-        str.includes('creating SNI context') ||
-        str.includes('HPE_HEADER_OVERFLOW') ||
-        str.includes('SSLV3_ALERT_CERTIFICATE_UNKNOWN') ||
-        str.includes('ERR_HTTP_REQUEST_TIMEOUT') ||
-        str.includes('Header overflow') ||
-        str.includes('ECONNRESET')
-      ) {
+      // In suppression window — swallow stack traces & error continuations
+      if (now < suppressUntil) {
+        suppressUntil = now + 200; // extend window for cascading errors
         return true;
       }
+      for (const p of NOISE_PATTERNS) {
+        if (str.includes(p)) {
+          suppressUntil = now + 200;
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const origStderrWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (chunk: any, ...args: any[]) => {
+      if (shouldSuppressWrite(chunk)) return true;
       return origStderrWrite(chunk, ...args);
     };
 
-    // Also suppress on stdout
     const origStdoutWrite = process.stdout.write.bind(process.stdout);
     process.stdout.write = (chunk: any, ...args: any[]) => {
-      const str = typeof chunk === 'string' ? chunk : chunk?.toString?.() || '';
-      if (
-        str.includes('HTTPS_CLIENT_ERROR') ||
-        str.includes('creating SNI context') ||
-        str.includes('HPE_HEADER_OVERFLOW') ||
-        str.includes('SSLV3_ALERT_CERTIFICATE_UNKNOWN') ||
-        str.includes('ERR_HTTP_REQUEST_TIMEOUT') ||
-        str.includes('Header overflow') ||
-        str.includes('ECONNRESET')
-      ) {
-        return true;
-      }
+      if (shouldSuppressWrite(chunk)) return true;
       return origStdoutWrite(chunk, ...args);
     };
 
