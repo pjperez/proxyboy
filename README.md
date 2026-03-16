@@ -26,6 +26,20 @@ ProxyBoy is a man-in-the-middle (MITM) HTTP/HTTPS proxy that captures, inspects,
 - **Dark Theme** — Tokyo Night-inspired dark UI
 - **Detachable AI Panel** — Pop the assistant out into its own window
 
+### In Action
+
+**HAR Import + Image Preview + AI Session Analysis**
+![HAR Import](assets/screenshot-har-import.png)
+Import a HAR file, preview images inline, and ask the AI assistant to break down what's in the capture.
+
+**Content Type Filtering + JSON Body Viewer**
+![JSON Filter](assets/screenshot-json-filter.png)
+Filter traffic by content type (JSON, HTML, CSS, JS, images, etc.) and inspect formatted response bodies.
+
+**AI-Powered Request Analysis**
+![AI Analysis](assets/screenshot-ai-analysis.png)
+Select any request and ask the AI to explain it — it calls tools like `analyzeFlow` to inspect headers, body, and context, then gives you a human-readable breakdown.
+
 ### AI Assistant Tools
 
 The embedded Copilot agent has access to these tools:
