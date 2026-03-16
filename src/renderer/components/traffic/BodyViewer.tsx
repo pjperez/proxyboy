@@ -1,4 +1,5 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
+import pako from 'pako';
 
 interface Props {
   body: string;
@@ -12,20 +13,63 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+function looksCompressed(str: string): boolean {
+  // Check for common garbled gzip/deflate patterns (non-printable chars in first 20 bytes)
+  const sample = str.slice(0, 40);
+  let nonPrintable = 0;
+  for (let i = 0; i < sample.length; i++) {
+    const c = sample.charCodeAt(i);
+    if (c < 32 && c !== 9 && c !== 10 && c !== 13) nonPrintable++;
+    if (c > 126 && c < 160) nonPrintable++;
+  }
+  return nonPrintable > sample.length * 0.3;
+}
+
+function tryDecompress(str: string): string | null {
+  try {
+    // Convert the garbled UTF-8 string back to bytes
+    const bytes = new Uint8Array(str.length);
+    for (let i = 0; i < str.length; i++) {
+      bytes[i] = str.charCodeAt(i) & 0xff;
+    }
+    // Try gzip first
+    if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
+      return pako.ungzip(bytes, { to: 'string' });
+    }
+    // Try inflate (raw deflate or zlib)
+    try {
+      return pako.inflate(bytes, { to: 'string' });
+    } catch {
+      return pako.inflateRaw(bytes, { to: 'string' });
+    }
+  } catch {
+    return null;
+  }
+}
+
 export default function BodyViewer({ body, contentType, isBase64 }: Props) {
   const isImage = contentType.startsWith('image/');
+  const compressed = useMemo(() => !isImage && looksCompressed(body), [body, isImage]);
+  const [showDecoded, setShowDecoded] = useState(true);
+
+  const decoded = useMemo(() => {
+    if (!compressed || !showDecoded) return null;
+    return tryDecompress(body);
+  }, [body, compressed, showDecoded]);
+
+  const displayBody = decoded ?? body;
 
   const formatted = useMemo(() => {
-    if (isImage) return body;
+    if (isImage) return displayBody;
     if (contentType.includes('json')) {
       try {
-        return JSON.stringify(JSON.parse(body), null, 2);
+        return JSON.stringify(JSON.parse(displayBody), null, 2);
       } catch {
-        return body;
+        return displayBody;
       }
     }
-    return body;
-  }, [body, contentType]);
+    return displayBody;
+  }, [displayBody, contentType, isImage]);
 
   if (isImage && isBase64) {
     const dataUrl = `data:${contentType};base64,${body}`;
@@ -59,6 +103,23 @@ export default function BodyViewer({ body, contentType, isBase64 }: Props) {
 
   return (
     <div className="bg-pb-bg rounded border border-pb-border overflow-auto max-h-96">
+      {compressed && (
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-pb-border bg-pb-surface">
+          <span className="text-[10px] text-pb-text-dim">
+            {decoded ? '✓ Decoded' : '⚠ Compressed'}
+          </span>
+          <button
+            onClick={() => setShowDecoded(!showDecoded)}
+            className={`px-2 py-0.5 text-[10px] rounded font-medium transition-colors ${
+              showDecoded
+                ? 'bg-pb-accent text-white'
+                : 'bg-pb-border text-pb-text-dim hover:text-pb-text'
+            }`}
+          >
+            {showDecoded ? 'Raw' : 'Decode'}
+          </button>
+        </div>
+      )}
       <pre className={`p-3 text-xs font-mono whitespace-pre-wrap break-all
         ${isJson ? 'text-pb-info' : isHtml || isXml ? 'text-pb-warning' : 'text-pb-text'}`}
       >

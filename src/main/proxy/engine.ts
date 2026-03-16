@@ -12,15 +12,26 @@ const MAX_FLOWS = 10000;
 const MAX_BODY_SIZE = 2 * 1024 * 1024; // 2 MB
 
 function decompressBody(body: Buffer, encoding?: string): Buffer {
-  if (!encoding) return body;
-  const enc = encoding.toLowerCase().trim();
-  try {
-    if (enc === 'gzip' || enc === 'x-gzip') return gunzipSync(body);
-    if (enc === 'br') return brotliDecompressSync(body);
-    if (enc === 'deflate') return inflateSync(body);
-  } catch {
-    // Return raw body if decompression fails
-    return body;
+  // Try explicit content-encoding first
+  if (encoding) {
+    const enc = encoding.toLowerCase().trim();
+    try {
+      if (enc === 'gzip' || enc === 'x-gzip') return gunzipSync(body);
+      if (enc === 'br') return brotliDecompressSync(body);
+      if (enc === 'deflate') return inflateSync(body);
+    } catch {
+      // Fall through to magic-byte detection
+    }
+  }
+  // Auto-detect by magic bytes (handles missing/stripped content-encoding)
+  if (body.length >= 2) {
+    if (body[0] === 0x1f && body[1] === 0x8b) {
+      try { return gunzipSync(body); } catch { /* not gzip */ }
+    }
+    // Deflate (zlib header: 0x78 0x01/9C/DA)
+    if (body[0] === 0x78 && (body[1] === 0x01 || body[1] === 0x9c || body[1] === 0xda)) {
+      try { return inflateSync(body); } catch { /* not deflate */ }
+    }
   }
   return body;
 }
