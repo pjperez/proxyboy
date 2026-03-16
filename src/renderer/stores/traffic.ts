@@ -6,6 +6,7 @@ const MAX_RENDERER_FLOWS = 5000;
 interface TrafficState {
   flows: HttpFlow[];
   filter: FilterCriteria;
+  setFlows: (flows: HttpFlow[]) => void;
   addFlow: (flow: HttpFlow) => void;
   updateFlow: (flow: HttpFlow) => void;
   clearFlows: () => void;
@@ -17,6 +18,8 @@ export const useTrafficStore = create<TrafficState>((set, get) => ({
   flows: [],
   filter: {},
 
+  setFlows: (flows) => set({ flows }),
+
   addFlow: (flow) =>
     set((state) => {
       const next = [...state.flows, flow];
@@ -27,9 +30,15 @@ export const useTrafficStore = create<TrafficState>((set, get) => ({
     }),
 
   updateFlow: (flow) =>
-    set((state) => ({
-      flows: state.flows.map((f) => (f.id === flow.id ? flow : f)),
-    })),
+    set((state) => {
+      const index = state.flows.findIndex((f) => f.id === flow.id);
+      if (index === -1) {
+        return { flows: [...state.flows, flow] };
+      }
+      const next = [...state.flows];
+      next[index] = flow;
+      return { flows: next };
+    }),
 
   clearFlows: () => set({ flows: [] }),
 
@@ -67,6 +76,9 @@ export const useTrafficStore = create<TrafficState>((set, get) => ({
         return false;
       }
       if (filter.minDuration && (!flow.response || flow.response.duration < filter.minDuration)) {
+        return false;
+      }
+      if (filter.maxDuration && (!flow.response || flow.response.duration > filter.maxDuration)) {
         return false;
       }
       return true;

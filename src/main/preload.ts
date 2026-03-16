@@ -54,8 +54,8 @@ const api = {
       ipcRenderer.on(IPC_CHANNELS.BREAKPOINT_PAUSED, handler);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.BREAKPOINT_PAUSED, handler);
     },
-    resume: (flowId: string, action: 'forward' | 'drop', modifications?: any) =>
-      ipcRenderer.invoke(IPC_CHANNELS.BREAKPOINT_RESUME, { flowId, action, modifications }),
+    resume: (flowId: string, action: 'forward' | 'drop') =>
+      ipcRenderer.invoke(IPC_CHANNELS.BREAKPOINT_RESUME, { flowId, action }),
   },
 
   // Agent
@@ -101,6 +101,7 @@ const api = {
     getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.APP_GET_VERSION),
     exportHar: (flowIds?: string[]) => ipcRenderer.invoke(IPC_CHANNELS.APP_EXPORT_HAR, flowIds),
     importHar: () => ipcRenderer.invoke(IPC_CHANNELS.APP_IMPORT_HAR),
+    pickFile: () => ipcRenderer.invoke(IPC_CHANNELS.APP_PICK_FILE),
   },
 
   // Debug

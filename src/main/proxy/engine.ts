@@ -172,12 +172,14 @@ export class ProxyEngine extends EventEmitter {
     };
 
     const origStderrWrite = process.stderr.write.bind(process.stderr);
+    this.origStderrWrite = origStderrWrite;
     process.stderr.write = (chunk: any, ...args: any[]) => {
       if (shouldSuppressWrite(chunk)) return true;
       return origStderrWrite(chunk, ...args);
     };
 
     const origStdoutWrite = process.stdout.write.bind(process.stdout);
+    this.origStdoutWrite = origStdoutWrite;
     process.stdout.write = (chunk: any, ...args: any[]) => {
       if (shouldSuppressWrite(chunk)) return true;
       return origStdoutWrite(chunk, ...args);
@@ -358,50 +360,59 @@ export class ProxyEngine extends EventEmitter {
       return;
     }
 
-    this.dnsResolver.timedLookup(hostname).then(({ dnsStart, dnsEnd }) => {
-      if (flow.timing) {
-        flow.timing.dnsStart = dnsStart;
-        flow.timing.dnsEnd = dnsEnd;
-        flow.timing.connectStart = Date.now();
-      }
-
-      callback();
-
-      // Hook upstream socket for TCP connect timing
-      process.nextTick(() => {
-        try {
-          const req = ctx.proxyToServerRequest;
-          if (!req) return;
-
-          const socket = req.socket || req.connection;
-          if (!socket) {
-            // Socket not yet assigned — wait for it
-            req.once?.('socket', (sock: any) => {
-              if (sock.connecting) {
-                sock.once('connect', () => {
-                  if (flow.timing) flow.timing.connectEnd = Date.now();
-                });
-              } else {
-                // Already connected (keep-alive reuse)
-                if (flow.timing) flow.timing.connectEnd = flow.timing.connectStart;
-              }
-            });
-            return;
-          }
-
-          if (socket.connecting) {
-            socket.once('connect', () => {
-              if (flow.timing) flow.timing.connectEnd = Date.now();
-            });
-          } else {
-            // Already connected (keep-alive reuse)
-            if (flow.timing) flow.timing.connectEnd = flow.timing.connectStart;
-          }
-        } catch {
-          // Non-critical — timing just won't include TCP
+    this.dnsResolver.timedLookup(hostname)
+      .then(({ dnsStart, dnsEnd, cacheHit }) => {
+        if (flow.timing) {
+          flow.timing.dnsStart = dnsStart;
+          flow.timing.dnsEnd = dnsEnd;
+          flow.timing.connectStart = Date.now();
         }
+        if (cacheHit) {
+          flow.tags.push('dns-cache-hit');
+        }
+
+        callback();
+
+        // Hook upstream socket for TCP connect timing
+        process.nextTick(() => {
+          try {
+            const req = ctx.proxyToServerRequest;
+            if (!req) return;
+
+            const socket = req.socket || req.connection;
+            if (!socket) {
+              req.once?.('socket', (sock: any) => {
+                if (sock.connecting) {
+                  sock.once('connect', () => {
+                    if (flow.timing) flow.timing.connectEnd = Date.now();
+                  });
+                } else if (flow.timing) {
+                  flow.timing.connectEnd = flow.timing.connectStart;
+                  flow.tags.push('connection-reused');
+                }
+              });
+              return;
+            }
+
+            if (socket.connecting) {
+              socket.once('connect', () => {
+                if (flow.timing) flow.timing.connectEnd = Date.now();
+              });
+            } else if (flow.timing) {
+              flow.timing.connectEnd = flow.timing.connectStart;
+              flow.tags.push('connection-reused');
+            }
+          } catch {
+            // Non-critical — timing just won't include TCP
+          }
+        });
+      })
+      .catch((error: Error) => {
+        flow.tags.push('dns-error');
+        flow.notes = flow.notes ? `${flow.notes}\n${error.message}` : error.message;
+        this.emit('proxy:error', error);
+        callback();
       });
-    });
   }
 
   async start(): Promise<void> {

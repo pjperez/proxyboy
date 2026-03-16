@@ -24,6 +24,8 @@ const CONTENT_TYPE_PRESETS = [
 export default function FilterBar() {
   const { filter, setFilter } = useTrafficStore();
   const [searchText, setSearchText] = useState('');
+  const [minDurationText, setMinDurationText] = useState('');
+  const [maxDurationText, setMaxDurationText] = useState('');
 
   const handleSearch = (text: string) => {
     setSearchText(text);
@@ -71,16 +73,26 @@ export default function FilterBar() {
 
   const clearFilters = () => {
     setSearchText('');
+    setMinDurationText('');
+    setMaxDurationText('');
     setFilter({});
   };
 
-  const hasFilters = searchText || filter.methods?.length || filter.statusCodes?.length || filter.contentTypes?.length || filter.hasError;
+  const hasFilters =
+    searchText ||
+    minDurationText ||
+    maxDurationText ||
+    filter.methods?.length ||
+    filter.statusCodes?.length ||
+    filter.contentTypes?.length ||
+    filter.hasError;
 
   return (
     <div className="flex items-center gap-2 px-3 py-2 bg-pb-surface border-b border-pb-border overflow-x-auto">
       {/* Search */}
       <div className="relative shrink-0 w-52">
         <input
+          id="traffic-filter-input"
           type="text"
           value={searchText}
           onChange={(e) => handleSearch(e.target.value)}
@@ -144,6 +156,34 @@ export default function FilterBar() {
         onClick={toggleErrors}
         color="error"
       />
+
+      <span className="text-pb-border shrink-0">|</span>
+      <div className="flex items-center gap-1 shrink-0">
+        <input
+          type="number"
+          min={0}
+          value={minDurationText}
+          onChange={(e) => {
+            const value = e.target.value;
+            setMinDurationText(value);
+            setFilter({ ...filter, minDuration: value ? parseInt(value, 10) || undefined : undefined });
+          }}
+          placeholder="Min ms"
+          className="w-20 h-7 bg-pb-bg border border-pb-border rounded px-2 text-xs text-pb-text placeholder-pb-text-dim focus:outline-none focus:border-pb-accent"
+        />
+        <input
+          type="number"
+          min={0}
+          value={maxDurationText}
+          onChange={(e) => {
+            const value = e.target.value;
+            setMaxDurationText(value);
+            setFilter({ ...filter, maxDuration: value ? parseInt(value, 10) || undefined : undefined });
+          }}
+          placeholder="Max ms"
+          className="w-20 h-7 bg-pb-bg border border-pb-border rounded px-2 text-xs text-pb-text placeholder-pb-text-dim focus:outline-none focus:border-pb-accent"
+        />
+      </div>
 
       {/* Clear all */}
       {hasFilters && (

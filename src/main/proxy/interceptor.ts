@@ -86,7 +86,7 @@ export class Interceptor {
 
   getMapLocalResponse(rule: MapLocalRule): { statusCode: number; headers: Record<string, string>; body: Buffer } | null {
     try {
-      const resolvedPath = path.resolve(rule.localFilePath);
+      const resolvedPath = fs.realpathSync(path.resolve(rule.localFilePath));
       const lowerPath = resolvedPath.toLowerCase();
 
       // Block system directories

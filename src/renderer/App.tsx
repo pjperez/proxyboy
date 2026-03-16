@@ -69,6 +69,7 @@ function MainApp() {
 
   const flows = useTrafficStore(s => s.flows);
   const filter = useTrafficStore(s => s.filter);
+  const setFlows = useTrafficStore(s => s.setFlows);
   const addFlow = useTrafficStore(s => s.addFlow);
   const updateFlow = useTrafficStore(s => s.updateFlow);
   const getFilteredFlows = useTrafficStore(s => s.getFilteredFlows);
@@ -96,6 +97,12 @@ function MainApp() {
       setBreakpointPause(data);
     });
 
+    api.traffic.getFlows().then((loadedFlows: any[]) => {
+      if (Array.isArray(loadedFlows)) {
+        setFlows(loadedFlows);
+      }
+    }).catch(() => {});
+
     api.proxy.getStatus().then((status: any) => {
       setProxyRunning(status.running);
       if (status.port) {
@@ -121,9 +128,22 @@ function MainApp() {
     };
   }, []);
 
+  const filteredFlows = useMemo(() => getFilteredFlows(), [flows, filter]);
+  const selectedFlow = useMemo(
+    () => selectedFlowId ? flows.find(f => f.id === selectedFlowId) ?? null : null,
+    [flows, selectedFlowId]
+  );
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const isTypingTarget = !!target && (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable
+      );
+
       if (e.ctrlKey && e.shiftKey && e.key === 'A') {
         e.preventDefault();
         if (agentDetached) {
@@ -137,16 +157,34 @@ function MainApp() {
         useTrafficStore.getState().clearFlows();
         window.proxyboy?.traffic.clear();
       }
+      if (e.ctrlKey && e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        const input = document.getElementById('traffic-filter-input') as HTMLInputElement | null;
+        input?.focus();
+        input?.select();
+      }
+
+      if (!isTypingTarget && selectedView === 'traffic' && filteredFlows.length > 0) {
+        const currentIndex = selectedFlowId
+          ? filteredFlows.findIndex((flow) => flow.id === selectedFlowId)
+          : -1;
+
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          const nextIndex = Math.min(currentIndex + 1, filteredFlows.length - 1);
+          setSelectedFlowId(filteredFlows[nextIndex].id);
+        }
+
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          const nextIndex = currentIndex <= 0 ? 0 : currentIndex - 1;
+          setSelectedFlowId(filteredFlows[nextIndex].id);
+        }
+      }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [agentDetached]);
-
-  const filteredFlows = useMemo(() => getFilteredFlows(), [flows, filter]);
-  const selectedFlow = useMemo(
-    () => selectedFlowId ? flows.find(f => f.id === selectedFlowId) ?? null : null,
-    [flows, selectedFlowId]
-  );
+  }, [agentDetached, filteredFlows, selectedFlowId, selectedView]);
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden">

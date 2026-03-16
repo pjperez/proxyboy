@@ -74,7 +74,8 @@ function initializeSchema(database: SqlJsDatabase): void {
       state TEXT NOT NULL DEFAULT 'pending',
       tags TEXT DEFAULT '[]',
       notes TEXT,
-      created_at INTEGER NOT NULL
+      created_at INTEGER NOT NULL,
+      timing TEXT
     );
   `);
   database.run(`
@@ -88,6 +89,7 @@ function initializeSchema(database: SqlJsDatabase): void {
       path TEXT NOT NULL,
       headers TEXT NOT NULL DEFAULT '{}',
       body TEXT,
+      body_encoding TEXT DEFAULT 'utf8',
       body_size INTEGER DEFAULT 0,
       timestamp INTEGER NOT NULL,
       FOREIGN KEY (flow_id) REFERENCES flows(id) ON DELETE CASCADE
@@ -102,6 +104,7 @@ function initializeSchema(database: SqlJsDatabase): void {
       status_message TEXT,
       headers TEXT NOT NULL DEFAULT '{}',
       body TEXT,
+      body_encoding TEXT DEFAULT 'utf8',
       body_size INTEGER DEFAULT 0,
       timestamp INTEGER NOT NULL,
       duration INTEGER DEFAULT 0,
@@ -145,6 +148,26 @@ function initializeSchema(database: SqlJsDatabase): void {
   database.run('CREATE INDEX IF NOT EXISTS idx_requests_method ON requests(method);');
   database.run('CREATE INDEX IF NOT EXISTS idx_responses_status_code ON responses(status_code);');
   database.run('CREATE INDEX IF NOT EXISTS idx_agent_messages_conversation ON agent_messages(conversation_id);');
+  ensureColumn(database, 'flows', 'timing', 'TEXT');
+  ensureColumn(database, 'requests', 'body_encoding', "TEXT DEFAULT 'utf8'");
+  ensureColumn(database, 'responses', 'body_encoding', "TEXT DEFAULT 'utf8'");
+}
+
+function ensureColumn(database: SqlJsDatabase, table: string, column: string, definition: string): void {
+  const stmt = database.prepare(`PRAGMA table_info(${table})`);
+  let exists = false;
+  while (stmt.step()) {
+    const row = stmt.getAsObject();
+    if (row.name === column) {
+      exists = true;
+      break;
+    }
+  }
+  stmt.free();
+
+  if (!exists) {
+    database.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  }
 }
 
 export function closeDatabase(): void {

@@ -84,7 +84,12 @@ function TrafficRowInner({ flow, selected, onSelect, onContextMenu, visibleColum
       )}
       {v.has('status') && (
         <span className={`w-12 font-mono ${getStatusColor(flow.response?.statusCode)}`}>
-          {flow.response?.statusCode || '...'}
+          {flow.response?.statusCode || (
+            <span className="inline-flex items-center gap-1 text-pb-text-dim" title={flow.state === 'pending' ? 'Waiting for response' : 'Pending'}>
+              <span className="w-1.5 h-1.5 rounded-full bg-pb-accent animate-pulse" />
+              ...
+            </span>
+          )}
         </span>
       )}
       {v.has('host') && (
