@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRulesStore } from '../../stores/rules';
 import type { BreakpointRule } from '../../../shared/types';
 
@@ -14,7 +14,7 @@ export default function BreakpointEditor() {
 
   useEffect(() => { loadRules(); }, []);
 
-  const handleCreate = async () => {
+  const handleCreate = useCallback(async () => {
     const api = (window as any).proxyboy;
     if (!api || !name || !urlPattern) return;
 
@@ -29,21 +29,21 @@ export default function BreakpointEditor() {
     setShowForm(false);
     setName('');
     setUrlPattern('');
-  };
+  }, [name, urlPattern, isRegex, breakOn, loadRules]);
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = useCallback(async (id: string) => {
     const api = (window as any).proxyboy;
     if (!api) return;
     await api.rules.delete(id);
     await loadRules();
-  };
+  }, [loadRules]);
 
-  const handleToggle = async (id: string) => {
+  const handleToggle = useCallback(async (id: string) => {
     const api = (window as any).proxyboy;
     if (!api) return;
     await api.rules.toggle(id);
     await loadRules();
-  };
+  }, [loadRules]);
 
   return (
     <div className="flex flex-col h-full p-4">

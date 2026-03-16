@@ -6,6 +6,7 @@ import * as os from 'os';
 export class Interceptor {
   private breakpointRules: BreakpointRule[] = [];
   private mapLocalRules: MapLocalRule[] = [];
+  private regexCache: Map<string, RegExp> = new Map();
   private pausedFlows: Map<string, {
     resolve: (action: 'forward' | 'drop') => void;
     flow: HttpFlow;
@@ -14,6 +15,7 @@ export class Interceptor {
   setRules(rules: Rule[]): void {
     this.breakpointRules = rules.filter((r): r is BreakpointRule => r.type === 'breakpoint' && r.enabled);
     this.mapLocalRules = rules.filter((r): r is MapLocalRule => r.type === 'map-local' && r.enabled);
+    this.regexCache.clear();
   }
 
   getBreakpointRuleCount(): number {
@@ -28,21 +30,39 @@ export class Interceptor {
     }));
   }
 
+  private hasNestedQuantifiers(pattern: string): boolean {
+    // Detect patterns like (a+)+, (.*){2}, (a*)+, etc.
+    return /(\(.*[+*].*\))[+*{\d]/.test(pattern) || /([+*]\))[+*]/.test(pattern);
+  }
+
+  private getCachedRegex(pattern: string, flags?: string): RegExp | null {
+    const key = `${pattern}|||${flags || ''}`;
+    let cached = this.regexCache.get(key);
+    if (!cached) {
+      try {
+        cached = new RegExp(pattern, flags);
+        this.regexCache.set(key, cached);
+      } catch {
+        return null;
+      }
+    }
+    return cached;
+  }
+
   matchesUrl(pattern: string, url: string, isRegex?: boolean): boolean {
     if (isRegex) {
       if (pattern.length > 500) return false;
-      try {
-        return new RegExp(pattern).test(url);
-      } catch {
-        return false;
-      }
+      if (this.hasNestedQuantifiers(pattern)) return false;
+      const re = this.getCachedRegex(pattern);
+      return re ? re.test(url) : false;
     }
     // Glob-style matching: * matches anything
-    const regex = pattern
+    const globRegex = pattern
       .replace(/[.+^${}()|[\]\\]/g, '\\$&')
       .replace(/\*/g, '.*')
       .replace(/\?/g, '.');
-    return new RegExp(`^${regex}$`, 'i').test(url);
+    const re = this.getCachedRegex(`^${globRegex}$`, 'i');
+    return re ? re.test(url) : false;
   }
 
   shouldBreakpoint(flow: HttpFlow, phase: 'request' | 'response'): BreakpointRule | null {
@@ -85,10 +105,11 @@ export class Interceptor {
         return null;
       }
 
-      // Warn if outside user home
+      // Block paths outside user home directory
       const userHome = os.homedir();
       if (!lowerPath.startsWith(userHome.toLowerCase())) {
-        console.warn('[Interceptor] Map-local path outside user home:', resolvedPath);
+        console.warn('[Interceptor] Map-local path blocked (outside user home):', resolvedPath);
+        return null;
       }
 
       const body = fs.readFileSync(resolvedPath);
@@ -112,7 +133,8 @@ export class Interceptor {
         headers,
         body,
       };
-    } catch {
+    } catch (err) {
+      console.warn(`[Interceptor] Map-local file read error for rule "${rule.name}" at path "${rule.localFilePath}":`, err);
       return null;
     }
   }
@@ -129,6 +151,13 @@ export class Interceptor {
       paused.resolve(action);
       this.pausedFlows.delete(flowId);
     }
+  }
+
+  clearPausedFlows(): void {
+    for (const [, paused] of this.pausedFlows) {
+      paused.resolve('forward');
+    }
+    this.pausedFlows.clear();
   }
 
   getPausedFlows(): Map<string, { flow: HttpFlow }> {

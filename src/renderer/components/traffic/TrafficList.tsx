@@ -268,7 +268,7 @@ export default function TrafficList({ flows, selectedId, onSelect }: Props) {
             key={flow.id}
             flow={flow}
             selected={flow.id === selectedId}
-            onClick={() => onSelect(flow.id)}
+            onSelect={onSelect}
             onContextMenu={handleContextMenu}
             visibleColumns={visibleColumns}
             columnKey={columnKey}
