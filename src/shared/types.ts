@@ -36,6 +36,15 @@ export interface HttpFlow {
   tags: string[];
   notes?: string;
   createdAt: number;
+  timing?: FlowTiming;
+}
+
+export interface FlowTiming {
+  start: number;
+  requestEnd?: number;
+  responseStart?: number;
+  firstByte?: number;
+  responseEnd?: number;
 }
 
 export type FlowState = 'pending' | 'complete' | 'error' | 'paused' | 'blocked';

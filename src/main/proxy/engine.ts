@@ -231,6 +231,7 @@ export class ProxyEngine extends EventEmitter {
         state: 'pending',
         tags: [],
         createdAt: startTime,
+        timing: { start: startTime },
       };
 
       this.flows.set(flowId, flow);
@@ -248,13 +249,16 @@ export class ProxyEngine extends EventEmitter {
           flow.request.body = body;
           flow.request.bodySize = body.length;
         }
+        if (flow.timing) flow.timing.requestEnd = Date.now();
         callback();
       });
 
       // Collect response
       const responseChunks: Buffer[] = [];
+      let firstByteRecorded = false;
 
       ctx.onResponse((ctx: any, cb: () => void) => {
+        if (flow.timing) flow.timing.responseStart = Date.now();
         // Response-phase breakpoint
         const responseBreakRule = this.interceptor.shouldBreakpoint(flow, 'response');
         if (responseBreakRule) {
@@ -269,11 +273,18 @@ export class ProxyEngine extends EventEmitter {
       });
 
       ctx.onResponseData((ctx: any, chunk: Buffer, callback: (err: null, chunk: Buffer) => void) => {
+        if (!firstByteRecorded && flow.timing) {
+          flow.timing.firstByte = Date.now();
+          firstByteRecorded = true;
+        }
         responseChunks.push(chunk);
         callback(null, chunk);
       });
 
       ctx.onResponseEnd((ctx: any, cb: () => void) => {
+        const endTime = Date.now();
+        if (flow.timing) flow.timing.responseEnd = endTime;
+
         const rawBody = responseChunks.length > 0 ? Buffer.concat(responseChunks) : undefined;
         let responseBody = rawBody ? decompressBody(rawBody, ctx.serverToProxyResponse?.headers?.['content-encoding']) : undefined;
 

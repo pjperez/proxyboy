@@ -102,26 +102,123 @@ export default function TrafficDetail({ flow, onClose }: Props) {
           </div>
         )}
         {tab === 'timing' && (
-          <div className="space-y-3">
+          <div className="space-y-4">
             <div className="text-xs">
               <span className="text-pb-text-dim">Started: </span>
               <span>{new Date(flow.request.timestamp).toLocaleTimeString()}</span>
             </div>
             {flow.response && (
-              <>
-                <div className="text-xs">
-                  <span className="text-pb-text-dim">Duration: </span>
-                  <span className="text-pb-accent font-mono">{flow.response.duration}ms</span>
-                </div>
-                <div className="mt-4">
-                  <div className="h-6 bg-pb-surface rounded overflow-hidden">
-                    <div
-                      className="h-full bg-pb-accent/30 rounded"
-                      style={{ width: `${Math.min(100, (flow.response.duration / 2000) * 100)}%` }}
-                    />
+              <div className="text-xs">
+                <span className="text-pb-text-dim">Total: </span>
+                <span className="text-pb-accent font-mono font-bold">{flow.response.duration}ms</span>
+              </div>
+            )}
+
+            {/* Waterfall breakdown */}
+            {flow.timing && flow.response && (() => {
+              const t = flow.timing!;
+              const total = flow.response!.duration || 1;
+              const phases: { label: string; start: number; end: number; color: string }[] = [];
+
+              // Request sending
+              if (t.requestEnd) {
+                phases.push({
+                  label: 'Request',
+                  start: 0,
+                  end: t.requestEnd - t.start,
+                  color: 'bg-green-500',
+                });
+              }
+
+              // Waiting (TTFB) — from request end to first response byte
+              const waitStart = (t.requestEnd ?? t.start) - t.start;
+              const waitEnd = (t.firstByte ?? t.responseStart ?? t.responseEnd ?? t.start) - t.start;
+              if (waitEnd > waitStart) {
+                phases.push({
+                  label: 'Waiting (TTFB)',
+                  start: waitStart,
+                  end: waitEnd,
+                  color: 'bg-blue-500',
+                });
+              }
+
+              // Response download — from first byte to response end
+              const dlStart = (t.firstByte ?? t.responseStart ?? t.start) - t.start;
+              const dlEnd = (t.responseEnd ?? t.start) - t.start;
+              if (dlEnd > dlStart) {
+                phases.push({
+                  label: 'Download',
+                  start: dlStart,
+                  end: dlEnd,
+                  color: 'bg-purple-500',
+                });
+              }
+
+              return (
+                <div className="space-y-2 mt-2">
+                  {phases.map((phase, i) => (
+                    <div key={i} className="flex items-center gap-3">
+                      <div className="w-28 text-[11px] text-pb-text-dim text-right shrink-0">
+                        {phase.label}
+                      </div>
+                      <div className="flex-1 h-5 bg-pb-surface rounded overflow-hidden relative">
+                        <div
+                          className={`absolute top-0 h-full ${phase.color} rounded opacity-70`}
+                          style={{
+                            left: `${(phase.start / total) * 100}%`,
+                            width: `${Math.max(1, ((phase.end - phase.start) / total) * 100)}%`,
+                          }}
+                        />
+                      </div>
+                      <div className="w-16 text-[11px] font-mono text-pb-text text-right shrink-0">
+                        {phase.end - phase.start}ms
+                      </div>
+                    </div>
+                  ))}
+
+                  {/* Summary table */}
+                  <div className="mt-4 border border-pb-border rounded bg-pb-surface">
+                    <table className="w-full text-xs">
+                      <tbody>
+                        {t.requestEnd && (
+                          <tr className="border-b border-pb-border">
+                            <td className="px-3 py-1.5 text-pb-text-dim">Request sent</td>
+                            <td className="px-3 py-1.5 font-mono text-right">{t.requestEnd - t.start}ms</td>
+                          </tr>
+                        )}
+                        {waitEnd > waitStart && (
+                          <tr className="border-b border-pb-border">
+                            <td className="px-3 py-1.5 text-pb-text-dim">Waiting (TTFB)</td>
+                            <td className="px-3 py-1.5 font-mono text-right">{waitEnd - waitStart}ms</td>
+                          </tr>
+                        )}
+                        {dlEnd > dlStart && (
+                          <tr className="border-b border-pb-border">
+                            <td className="px-3 py-1.5 text-pb-text-dim">Content download</td>
+                            <td className="px-3 py-1.5 font-mono text-right">{dlEnd - dlStart}ms</td>
+                          </tr>
+                        )}
+                        <tr>
+                          <td className="px-3 py-1.5 text-pb-text font-medium">Total</td>
+                          <td className="px-3 py-1.5 font-mono font-bold text-pb-accent text-right">{total}ms</td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
                 </div>
-              </>
+              );
+            })()}
+
+            {/* Fallback for flows without timing breakdown */}
+            {!flow.timing && flow.response && (
+              <div className="mt-4">
+                <div className="h-6 bg-pb-surface rounded overflow-hidden">
+                  <div
+                    className="h-full bg-pb-accent/30 rounded"
+                    style={{ width: `${Math.min(100, (flow.response.duration / 2000) * 100)}%` }}
+                  />
+                </div>
+              </div>
             )}
           </div>
         )}
