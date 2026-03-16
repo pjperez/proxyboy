@@ -75,8 +75,16 @@ declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
 declare const MAIN_WINDOW_VITE_NAME: string;
 
 app.whenReady().then(async () => {
-  await initDatabase();
-  createWindow();
+  try {
+    await initDatabase();
+    createWindow();
+  } catch (error) {
+    console.error('Failed to initialize application:', error);
+    app.quit();
+  }
+}).catch((error) => {
+  console.error('app.whenReady() failed:', error);
+  app.quit();
 });
 
 app.on('window-all-closed', async () => {

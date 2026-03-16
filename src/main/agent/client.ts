@@ -24,6 +24,8 @@ export class AgentClient {
   private sdk: any = null;
   private autoApprove = false;
   private pendingPermissions = new Map<string, { resolve: (value: { kind: string }) => void }>();
+  private sessionPromise: Promise<void> | null = null;
+  private sessionEventUnsubscribe: (() => void) | null = null;
 
   constructor(proxyEngine: ProxyEngine, broadcast: (channel: string, data: any) => void) {
     this.proxyEngine = proxyEngine;
@@ -167,7 +169,7 @@ export class AgentClient {
       defineTool('getProxyStatus', {
         description: 'Get current proxy status including running state and flow counts',
         parameters: { type: 'object', properties: {} },
-        handler: async () => ({ running: engine.isRunning(), totalFlows: engine.getFlows().length, errorFlows: engine.getFlows().filter((f: HttpFlow) => f.response && f.response.statusCode >= 400).length }),
+        handler: async () => ({ running: engine.isRunning(), totalFlows: engine.getFlowCount(), errorFlows: engine.getErrorFlowCount() }),
       }),
       defineTool('toggleProxy', {
         description: 'Start or stop the proxy',
@@ -180,6 +182,64 @@ export class AgentClient {
     ];
   }
 
+  private async _createSession(contextPrompt: string): Promise<void> {
+    console.log('[Agent] Creating session...');
+    this.session = await this.client!.createSession({
+      systemMessage: {
+        content: SYSTEM_PROMPT + contextPrompt,
+      },
+      tools: this.buildTools(),
+      streaming: true,
+      onPermissionRequest: async (request: any) => {
+        if (this.autoApprove) {
+          return { kind: 'approved' };
+        }
+
+        const id = randomUUID();
+        const toolName = request?.toolName || request?.name || 'unknown';
+        const args = request?.arguments || request?.args || {};
+
+        this.broadcast(IPC_CHANNELS.AGENT_PERMISSION_REQUEST, {
+          id,
+          toolName,
+          arguments: args,
+        });
+
+        return new Promise<{ kind: string }>((resolve) => {
+          const timeoutId = setTimeout(() => {
+            if (this.pendingPermissions.has(id)) {
+              this.pendingPermissions.delete(id);
+              resolve({ kind: 'denied' });
+            }
+          }, 60000);
+
+          this.pendingPermissions.set(id, {
+            resolve: (value: { kind: string }) => {
+              clearTimeout(timeoutId);
+              resolve(value);
+            },
+          });
+        });
+      },
+    });
+
+    // Stream events to renderer and store unsubscribe for cleanup
+    this.sessionEventUnsubscribe = this.session.on((event: any) => {
+      if (event.type === 'assistant.message_delta') {
+        this.broadcast(IPC_CHANNELS.AGENT_MESSAGE_DELTA, {
+          content: event.data.deltaContent,
+        });
+      }
+      if (event.type === 'tool.execution_start') {
+        this.broadcast(IPC_CHANNELS.AGENT_TOOL_CALL, {
+          name: event.data?.toolName || 'unknown',
+          args: event.data?.arguments || {},
+        });
+      }
+    });
+    console.log('[Agent] Session created');
+  }
+
   async sendMessage(message: string): Promise<string> {
     if (!this.client || !this.initialized) {
       await this.initialize();
@@ -187,66 +247,16 @@ export class AgentClient {
 
     const contextPrompt = buildContextPrompt({
       running: this.proxyEngine.isRunning(),
-      totalRequests: this.proxyEngine.getFlows().length,
+      totalRequests: this.proxyEngine.getFlowCount(),
       port: this.proxyEngine.getPort(),
     });
 
     if (!this.session) {
-      console.log('[Agent] Creating session...');
-      this.session = await this.client!.createSession({
-        systemMessage: {
-          content: SYSTEM_PROMPT + contextPrompt,
-        },
-        tools: this.buildTools(),
-        streaming: true,
-        onPermissionRequest: async (request: any) => {
-          if (this.autoApprove) {
-            return { kind: 'approved' };
-          }
-
-          const id = randomUUID();
-          const toolName = request?.toolName || request?.name || 'unknown';
-          const args = request?.arguments || request?.args || {};
-
-          this.broadcast(IPC_CHANNELS.AGENT_PERMISSION_REQUEST, {
-            id,
-            toolName,
-            arguments: args,
-          });
-
-          return new Promise<{ kind: string }>((resolve) => {
-            const timeoutId = setTimeout(() => {
-              if (this.pendingPermissions.has(id)) {
-                this.pendingPermissions.delete(id);
-                resolve({ kind: 'denied' });
-              }
-            }, 60000);
-
-            this.pendingPermissions.set(id, {
-              resolve: (value: { kind: string }) => {
-                clearTimeout(timeoutId);
-                resolve(value);
-              },
-            });
-          });
-        },
-      });
-
-      // Stream events to renderer
-      this.session.on((event: any) => {
-        if (event.type === 'assistant.message_delta') {
-          this.broadcast(IPC_CHANNELS.AGENT_MESSAGE_DELTA, {
-            content: event.data.deltaContent,
-          });
-        }
-        if (event.type === 'tool.execution_start') {
-          this.broadcast(IPC_CHANNELS.AGENT_TOOL_CALL, {
-            name: event.data?.toolName || 'unknown',
-            args: event.data?.arguments || {},
-          });
-        }
-      });
-      console.log('[Agent] Session created');
+      if (!this.sessionPromise) {
+        this.sessionPromise = this._createSession(contextPrompt);
+      }
+      await this.sessionPromise;
+      this.sessionPromise = null;
     }
 
     console.log('[Agent] Sending message:', message.slice(0, 100));
@@ -299,11 +309,16 @@ export class AgentClient {
   }
 
   async stop(): Promise<void> {
+    if (this.sessionEventUnsubscribe) {
+      this.sessionEventUnsubscribe();
+      this.sessionEventUnsubscribe = null;
+    }
     if (this.client) {
       await this.client.stop();
       this.client = null;
       this.session = null;
       this.initialized = false;
+      this.sessionPromise = null;
     }
   }
 

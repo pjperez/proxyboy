@@ -33,6 +33,8 @@ export class ProxyEngine extends EventEmitter {
   private flows: Map<string, HttpFlow> = new Map();
   private running = false;
   private setupDone = false;
+  private origStdoutWrite: typeof process.stdout.write | null = null;
+  private origStderrWrite: typeof process.stderr.write | null = null;
 
   constructor(options: ProxyEngineOptions, certManager: CertificateManager) {
     super();
@@ -54,8 +56,28 @@ export class ProxyEngine extends EventEmitter {
     return this.options.port;
   }
 
+  setPort(port: number): void {
+    this.options.port = port;
+  }
+
   getFlows(): HttpFlow[] {
     return Array.from(this.flows.values());
+  }
+
+  getFlowCount(): number {
+    return this.flows.size;
+  }
+
+  getErrorFlowCount(): number {
+    let count = 0;
+    for (const flow of this.flows.values()) {
+      if (flow.response && flow.response.statusCode >= 400) count++;
+    }
+    return count;
+  }
+
+  addFlow(flow: HttpFlow): void {
+    this.flows.set(flow.id, flow);
   }
 
   getFlow(id: string): HttpFlow | undefined {
@@ -326,8 +348,17 @@ export class ProxyEngine extends EventEmitter {
 
   async stop(): Promise<void> {
     if (!this.running) return;
+    this.interceptor.clearPausedFlows();
     this.proxy.close();
     this.running = false;
+    if (this.origStdoutWrite) {
+      process.stdout.write = this.origStdoutWrite;
+      this.origStdoutWrite = null;
+    }
+    if (this.origStderrWrite) {
+      process.stderr.write = this.origStderrWrite;
+      this.origStderrWrite = null;
+    }
     this.emit('proxy:stopped');
   }
 }
