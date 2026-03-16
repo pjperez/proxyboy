@@ -25,7 +25,7 @@ export default function BodyViewer({ body, contentType, isBase64 }: Props) {
       }
     }
     return body;
-  }, [body, contentType, isImage]);
+  }, [body, contentType]);
 
   if (isImage && isBase64) {
     const dataUrl = `data:${contentType};base64,${body}`;

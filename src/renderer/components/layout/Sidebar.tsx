@@ -14,7 +14,7 @@ const navItems = [
   { id: 'settings', label: 'Settings', icon: '⚙' },
 ];
 
-export default function Sidebar({ selectedView, onSelectView, onToggleAgent, showAgent }: Props) {
+function Sidebar({ selectedView, onSelectView, onToggleAgent, showAgent }: Props) {
   return (
     <div className="w-14 bg-pb-surface flex flex-col items-center py-3 gap-2 border-r border-pb-border">
       {navItems.map(item => (
@@ -40,3 +40,5 @@ export default function Sidebar({ selectedView, onSelectView, onToggleAgent, sho
     </div>
   );
 }
+
+export default React.memo(Sidebar);

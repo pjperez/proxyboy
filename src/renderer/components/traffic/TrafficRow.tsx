@@ -5,7 +5,7 @@ import type { ColumnKey } from './TrafficList';
 interface Props {
   flow: HttpFlow;
   selected: boolean;
-  onClick: () => void;
+  onSelect: (id: string) => void;
   onContextMenu?: (e: React.MouseEvent, flow: HttpFlow) => void;
   visibleColumns: Set<ColumnKey>;
   /** Stable string key for memo comparison (avoids Set reference issues) */
@@ -61,13 +61,13 @@ function getContentType(headers?: Record<string, any>): string {
   return ct.split(';')[0].split('/').pop() || '—';
 }
 
-function TrafficRowInner({ flow, selected, onClick, onContextMenu, visibleColumns }: Props) {
+function TrafficRowInner({ flow, selected, onSelect, onContextMenu, visibleColumns }: Props) {
   const pathPart = flow.request.url.replace(/^https?:\/\/[^/]+/, '');
   const v = visibleColumns;
 
   return (
     <div
-      onClick={onClick}
+      onClick={() => onSelect(flow.id)}
       onContextMenu={(e) => onContextMenu?.(e, flow)}
       className={`flex items-center h-8 px-3 text-xs cursor-pointer border-b border-pb-border/30 transition-colors
         ${selected ? 'bg-pb-accent/15 text-pb-text' : 'hover:bg-pb-surface-hover text-pb-text'}`}
@@ -125,7 +125,8 @@ const TrafficRow = React.memo(TrafficRowInner, (prev, next) => {
   return (
     prev.flow === next.flow &&
     prev.selected === next.selected &&
-    prev.onClick === next.onClick &&
+    prev.onSelect === next.onSelect &&
+    prev.onContextMenu === next.onContextMenu &&
     prev.columnKey === next.columnKey
   );
 });

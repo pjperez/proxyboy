@@ -143,7 +143,10 @@ function MainApp() {
   }, [agentDetached]);
 
   const filteredFlows = useMemo(() => getFilteredFlows(), [flows, filter]);
-  const selectedFlow = selectedFlowId ? flows.find(f => f.id === selectedFlowId) : null;
+  const selectedFlow = useMemo(
+    () => selectedFlowId ? flows.find(f => f.id === selectedFlowId) ?? null : null,
+    [flows, selectedFlowId]
+  );
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden">
