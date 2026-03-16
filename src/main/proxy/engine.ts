@@ -6,6 +6,7 @@ import { gunzipSync, inflateSync, brotliDecompressSync } from 'zlib';
 import { HttpFlow, HttpRequest, HttpResponse } from '../../shared/types';
 import { CertificateManager } from './certificate';
 import { Interceptor } from './interceptor';
+import { DnsResolverService } from './dns-resolver';
 import { ProxyEngineOptions } from './types';
 
 const MAX_FLOWS = 10000;
@@ -40,6 +41,7 @@ export class ProxyEngine extends EventEmitter {
   private proxy: IProxy;
   private certManager: CertificateManager;
   private interceptor: Interceptor;
+  private dnsResolver: DnsResolverService;
   private options: ProxyEngineOptions;
   private flows: Map<string, HttpFlow> = new Map();
   private running = false;
@@ -52,11 +54,16 @@ export class ProxyEngine extends EventEmitter {
     this.options = options;
     this.certManager = certManager;
     this.interceptor = new Interceptor();
+    this.dnsResolver = new DnsResolverService();
     this.proxy = new Proxy();
   }
 
   getInterceptor(): Interceptor {
     return this.interceptor;
+  }
+
+  getDnsResolver(): DnsResolverService {
+    return this.dnsResolver;
   }
 
   isRunning(): boolean {
@@ -331,12 +338,69 @@ export class ProxyEngine extends EventEmitter {
         this.emit('breakpoint:paused', { flowId, flow, phase: 'request' });
         this.interceptor.pauseFlow(flowId, flow).then(action => {
           if (action === 'drop') return;
-          callback();
+          this.resolveAndConnect(flow, ctx, callback);
         });
         return;
       }
 
+      this.resolveAndConnect(flow, ctx, callback);
+    });
+  }
+
+  /**
+   * Performs timed DNS lookup, calls the proxy callback, then hooks the
+   * upstream socket to capture TCP connect timing.
+   */
+  private resolveAndConnect(flow: HttpFlow, ctx: any, callback: () => void): void {
+    const hostname = (flow.request.host || '').split(':')[0];
+    if (!hostname) {
       callback();
+      return;
+    }
+
+    this.dnsResolver.timedLookup(hostname).then(({ dnsStart, dnsEnd }) => {
+      if (flow.timing) {
+        flow.timing.dnsStart = dnsStart;
+        flow.timing.dnsEnd = dnsEnd;
+        flow.timing.connectStart = Date.now();
+      }
+
+      callback();
+
+      // Hook upstream socket for TCP connect timing
+      process.nextTick(() => {
+        try {
+          const req = ctx.proxyToServerRequest;
+          if (!req) return;
+
+          const socket = req.socket || req.connection;
+          if (!socket) {
+            // Socket not yet assigned — wait for it
+            req.once?.('socket', (sock: any) => {
+              if (sock.connecting) {
+                sock.once('connect', () => {
+                  if (flow.timing) flow.timing.connectEnd = Date.now();
+                });
+              } else {
+                // Already connected (keep-alive reuse)
+                if (flow.timing) flow.timing.connectEnd = flow.timing.connectStart;
+              }
+            });
+            return;
+          }
+
+          if (socket.connecting) {
+            socket.once('connect', () => {
+              if (flow.timing) flow.timing.connectEnd = Date.now();
+            });
+          } else {
+            // Already connected (keep-alive reuse)
+            if (flow.timing) flow.timing.connectEnd = flow.timing.connectStart;
+          }
+        } catch {
+          // Non-critical — timing just won't include TCP
+        }
+      });
     });
   }
 

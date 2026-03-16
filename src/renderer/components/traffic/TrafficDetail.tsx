@@ -118,45 +118,78 @@ export default function TrafficDetail({ flow, onClose }: Props) {
             {flow.timing && flow.response && (() => {
               const t = flow.timing!;
               const total = flow.response!.duration || 1;
-              const phases: { label: string; start: number; end: number; color: string }[] = [];
+              const statusCode = flow.response!.statusCode;
 
-              // Request sending
-              if (t.requestEnd) {
-                phases.push({
-                  label: 'Request',
-                  start: 0,
-                  end: t.requestEnd - t.start,
-                  color: 'bg-green-500',
-                });
+              // Compute non-overlapping sequential phase durations from raw timestamps.
+              // Because http-mitm-proxy pipelines internally, some events arrive out of
+              // order (e.g. socket connect event fires after request starts sending).
+              // We treat the phases as a sequential waterfall and derive each from the
+              // gap between the ordered milestone timestamps.
+              const dnsDur = (t.dnsStart != null && t.dnsEnd != null) ? Math.max(0, t.dnsEnd - t.dnsStart) : null;
+              const tcpDur = (t.connectStart != null && t.connectEnd != null) ? Math.max(0, t.connectEnd - t.connectStart) : null;
+
+              // "Request sent" = time from after DNS+TCP to when request body is fully written.
+              // Use the latest of (connectEnd, dnsEnd, start) as the anchor, but if connectEnd
+              // is later than requestEnd (async socket event), fall back to dnsEnd.
+              const reqAnchor = t.requestEnd ?? t.start;
+              const afterDnsTcp = Math.max(t.dnsEnd ?? t.start, t.connectEnd ?? t.start, t.start);
+              const reqDur = Math.max(0, (reqAnchor - t.start) - (afterDnsTcp - t.start));
+
+              // TTFB = time from request end to first response byte/headers
+              const ttfbEnd = t.firstByte ?? t.responseStart ?? t.responseEnd ?? reqAnchor;
+              const ttfbDur = Math.max(0, ttfbEnd - reqAnchor);
+
+              // Download = first response byte to response complete
+              const dlAnchorStart = t.firstByte ?? t.responseStart ?? ttfbEnd;
+              const dlAnchorEnd = t.responseEnd ?? dlAnchorStart;
+              const dlDur = Math.max(0, dlAnchorEnd - dlAnchorStart);
+
+              const fmtDuration = (ms: number | null, zeroLabel?: string): string => {
+                if (ms === null) return '—';
+                if (ms === 0 && zeroLabel) return zeroLabel;
+                return `${ms}ms`;
+              };
+
+              // Build waterfall bars from cumulative offsets (no overlaps, no negatives)
+              type Phase = { label: string; offset: number; dur: number; color: string };
+              const allPhases: Phase[] = [];
+              let cursor = 0;
+              if (dnsDur !== null) {
+                allPhases.push({ label: 'DNS Lookup', offset: cursor, dur: dnsDur, color: 'bg-orange-400' });
+                cursor += dnsDur;
               }
-
-              // Waiting (TTFB) — from request end to first response byte
-              const waitStart = (t.requestEnd ?? t.start) - t.start;
-              const waitEnd = (t.firstByte ?? t.responseStart ?? t.responseEnd ?? t.start) - t.start;
-              if (waitEnd > waitStart) {
-                phases.push({
-                  label: 'Waiting (TTFB)',
-                  start: waitStart,
-                  end: waitEnd,
-                  color: 'bg-blue-500',
-                });
+              if (tcpDur !== null) {
+                allPhases.push({ label: 'TCP Connect', offset: cursor, dur: tcpDur, color: 'bg-amber-500' });
+                cursor += tcpDur;
               }
+              allPhases.push({ label: 'Request', offset: cursor, dur: reqDur, color: 'bg-green-500' });
+              cursor += reqDur;
+              allPhases.push({ label: 'Waiting (TTFB)', offset: cursor, dur: ttfbDur, color: 'bg-blue-500' });
+              cursor += ttfbDur;
+              allPhases.push({ label: 'Download', offset: cursor, dur: dlDur, color: 'bg-purple-500' });
 
-              // Response download — from first byte to response end
-              const dlStart = (t.firstByte ?? t.responseStart ?? t.start) - t.start;
-              const dlEnd = (t.responseEnd ?? t.start) - t.start;
-              if (dlEnd > dlStart) {
-                phases.push({
-                  label: 'Download',
-                  start: dlStart,
-                  end: dlEnd,
-                  color: 'bg-purple-500',
-                });
+              const bars = allPhases.filter(p => p.dur > 0);
+
+              // Table rows: always show all measured phases with smart labels
+              const noBody = statusCode === 304 || statusCode === 204 || statusCode === 301 || statusCode === 302;
+              const tableRows: { label: string; color: string; value: string }[] = [];
+              if (dnsDur !== null) {
+                tableRows.push({ label: 'DNS Lookup', color: 'bg-orange-400', value: fmtDuration(dnsDur, 'cached') });
+              }
+              if (tcpDur !== null) {
+                tableRows.push({ label: 'TCP Connect', color: 'bg-amber-500', value: fmtDuration(tcpDur, 'reused') });
+              }
+              tableRows.push({ label: 'Request sent', color: 'bg-green-500', value: fmtDuration(reqDur) });
+              tableRows.push({ label: 'Waiting (TTFB)', color: 'bg-blue-500', value: fmtDuration(ttfbDur) });
+              if (noBody && dlDur === 0) {
+                tableRows.push({ label: 'Content download', color: 'bg-purple-500', value: 'no content' });
+              } else {
+                tableRows.push({ label: 'Content download', color: 'bg-purple-500', value: fmtDuration(dlDur) });
               }
 
               return (
                 <div className="space-y-2 mt-2">
-                  {phases.map((phase, i) => (
+                  {bars.length > 0 && bars.map((phase, i) => (
                     <div key={i} className="flex items-center gap-3">
                       <div className="w-28 text-[11px] text-pb-text-dim text-right shrink-0">
                         {phase.label}
@@ -165,13 +198,13 @@ export default function TrafficDetail({ flow, onClose }: Props) {
                         <div
                           className={`absolute top-0 h-full ${phase.color} rounded opacity-70`}
                           style={{
-                            left: `${(phase.start / total) * 100}%`,
-                            width: `${Math.max(1, ((phase.end - phase.start) / total) * 100)}%`,
+                            left: `${(phase.offset / total) * 100}%`,
+                            width: `${Math.max(1, (phase.dur / total) * 100)}%`,
                           }}
                         />
                       </div>
                       <div className="w-16 text-[11px] font-mono text-pb-text text-right shrink-0">
-                        {phase.end - phase.start}ms
+                        {phase.dur}ms
                       </div>
                     </div>
                   ))}
@@ -180,24 +213,17 @@ export default function TrafficDetail({ flow, onClose }: Props) {
                   <div className="mt-4 border border-pb-border rounded bg-pb-surface">
                     <table className="w-full text-xs">
                       <tbody>
-                        {t.requestEnd && (
-                          <tr className="border-b border-pb-border">
-                            <td className="px-3 py-1.5 text-pb-text-dim">Request sent</td>
-                            <td className="px-3 py-1.5 font-mono text-right">{t.requestEnd - t.start}ms</td>
+                        {tableRows.map((row, i) => (
+                          <tr key={i} className="border-b border-pb-border">
+                            <td className="px-3 py-1.5 text-pb-text-dim flex items-center gap-2">
+                              <span className={`w-2 h-2 rounded-full ${row.color} inline-block`} />
+                              {row.label}
+                            </td>
+                            <td className={`px-3 py-1.5 font-mono text-right ${
+                              /^(cached|reused|no content)$/.test(row.value) ? 'text-pb-text-dim italic' : ''
+                            }`}>{row.value}</td>
                           </tr>
-                        )}
-                        {waitEnd > waitStart && (
-                          <tr className="border-b border-pb-border">
-                            <td className="px-3 py-1.5 text-pb-text-dim">Waiting (TTFB)</td>
-                            <td className="px-3 py-1.5 font-mono text-right">{waitEnd - waitStart}ms</td>
-                          </tr>
-                        )}
-                        {dlEnd > dlStart && (
-                          <tr className="border-b border-pb-border">
-                            <td className="px-3 py-1.5 text-pb-text-dim">Content download</td>
-                            <td className="px-3 py-1.5 font-mono text-right">{dlEnd - dlStart}ms</td>
-                          </tr>
-                        )}
+                        ))}
                         <tr>
                           <td className="px-3 py-1.5 text-pb-text font-medium">Total</td>
                           <td className="px-3 py-1.5 font-mono font-bold text-pb-accent text-right">{total}ms</td>

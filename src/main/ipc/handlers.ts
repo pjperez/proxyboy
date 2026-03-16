@@ -240,6 +240,34 @@ export function registerIpcHandlers(
     }
   });
 
+  // DNS configuration
+  ipcMain.handle(IPC_CHANNELS.DNS_GET_CONFIG, () => {
+    try {
+      const resolver = proxyEngine.getDnsResolver();
+      return { mode: resolver.getMode(), servers: resolver.getServers() };
+    } catch (error: any) {
+      return { mode: 'system', servers: [] };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.DNS_SET_SERVERS, (_event, servers: string[]) => {
+    try {
+      proxyEngine.getDnsResolver().setServers(servers);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.DNS_CLEAR_CACHE, () => {
+    try {
+      proxyEngine.getDnsResolver().clearCache();
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
   // Agent
   ipcMain.handle(IPC_CHANNELS.AGENT_SEND_MESSAGE, async (_event, data: { message: string; conversationId?: string }) => {
     try {

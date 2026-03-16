@@ -41,10 +41,19 @@ export interface HttpFlow {
 
 export interface FlowTiming {
   start: number;
+  dnsStart?: number;
+  dnsEnd?: number;
+  connectStart?: number;
+  connectEnd?: number;
   requestEnd?: number;
   responseStart?: number;
   firstByte?: number;
   responseEnd?: number;
+}
+
+export interface DnsConfig {
+  mode: 'system' | 'custom';
+  servers: string[];
 }
 
 export type FlowState = 'pending' | 'complete' | 'error' | 'paused' | 'blocked';

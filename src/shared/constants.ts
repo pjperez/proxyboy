@@ -45,6 +45,11 @@ export const IPC_CHANNELS = {
   APP_GET_VERSION: 'app:get-version',
   APP_EXPORT_HAR: 'app:export-har',
   APP_IMPORT_HAR: 'app:import-har',
+
+  // DNS
+  DNS_GET_CONFIG: 'dns:get-config',
+  DNS_SET_SERVERS: 'dns:set-servers',
+  DNS_CLEAR_CACHE: 'dns:clear-cache',
 } as const;
 
 export const DEFAULT_PROXY_PORT = 9090;
