@@ -4,6 +4,8 @@
 
 > ⚠️ **This is a personal/experimental project.** If you need a mature, production-ready HTTP debugging proxy, go check out **[Proxyman](https://proxyman.io/)** — it's excellent and was the direct inspiration for this project. ProxyBoy exists because I wanted a Windows-native alternative with agentic AI capabilities baked in, and I wanted to learn by building one.
 
+![ProxyBoy Screenshot](assets/screenshot.png)
+
 ---
 
 ## What is this?
