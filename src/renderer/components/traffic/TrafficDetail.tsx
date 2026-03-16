@@ -120,18 +120,29 @@ export default function TrafficDetail({ flow, onClose }: Props) {
               const total = flow.response!.duration || 1;
               const statusCode = flow.response!.statusCode;
 
-              // Compute all phase durations (ms). null = not measured.
-              const dnsDur = (t.dnsStart != null && t.dnsEnd != null) ? t.dnsEnd - t.dnsStart : null;
-              const tcpDur = (t.connectStart != null && t.connectEnd != null) ? t.connectEnd - t.connectStart : null;
-              const reqStart = (t.connectEnd ?? t.dnsEnd ?? t.start) - t.start;
-              const reqEnd = t.requestEnd ? t.requestEnd - t.start : reqStart;
-              const reqDur = reqEnd - reqStart;
-              const waitStart = (t.requestEnd ?? t.connectEnd ?? t.start) - t.start;
-              const waitEnd = (t.firstByte ?? t.responseStart ?? t.responseEnd ?? t.start) - t.start;
-              const waitDur = Math.max(0, waitEnd - waitStart);
-              const dlStart = (t.firstByte ?? t.responseStart ?? t.start) - t.start;
-              const dlEnd = (t.responseEnd ?? t.start) - t.start;
-              const dlDur = Math.max(0, dlEnd - dlStart);
+              // Compute non-overlapping sequential phase durations from raw timestamps.
+              // Because http-mitm-proxy pipelines internally, some events arrive out of
+              // order (e.g. socket connect event fires after request starts sending).
+              // We treat the phases as a sequential waterfall and derive each from the
+              // gap between the ordered milestone timestamps.
+              const dnsDur = (t.dnsStart != null && t.dnsEnd != null) ? Math.max(0, t.dnsEnd - t.dnsStart) : null;
+              const tcpDur = (t.connectStart != null && t.connectEnd != null) ? Math.max(0, t.connectEnd - t.connectStart) : null;
+
+              // "Request sent" = time from after DNS+TCP to when request body is fully written.
+              // Use the latest of (connectEnd, dnsEnd, start) as the anchor, but if connectEnd
+              // is later than requestEnd (async socket event), fall back to dnsEnd.
+              const reqAnchor = t.requestEnd ?? t.start;
+              const afterDnsTcp = Math.max(t.dnsEnd ?? t.start, t.connectEnd ?? t.start, t.start);
+              const reqDur = Math.max(0, (reqAnchor - t.start) - (afterDnsTcp - t.start));
+
+              // TTFB = time from request end to first response byte/headers
+              const ttfbEnd = t.firstByte ?? t.responseStart ?? t.responseEnd ?? reqAnchor;
+              const ttfbDur = Math.max(0, ttfbEnd - reqAnchor);
+
+              // Download = first response byte to response complete
+              const dlAnchorStart = t.firstByte ?? t.responseStart ?? ttfbEnd;
+              const dlAnchorEnd = t.responseEnd ?? dlAnchorStart;
+              const dlDur = Math.max(0, dlAnchorEnd - dlAnchorStart);
 
               const fmtDuration = (ms: number | null, zeroLabel?: string): string => {
                 if (ms === null) return '—';
@@ -139,24 +150,25 @@ export default function TrafficDetail({ flow, onClose }: Props) {
                 return `${ms}ms`;
               };
 
-              // Bars: only show phases with >0 duration
-              type Phase = { label: string; start: number; end: number; color: string };
-              const bars: Phase[] = [];
-              if (dnsDur != null && dnsDur > 0) {
-                bars.push({ label: 'DNS Lookup', start: t.dnsStart! - t.start, end: t.dnsEnd! - t.start, color: 'bg-orange-400' });
+              // Build waterfall bars from cumulative offsets (no overlaps, no negatives)
+              type Phase = { label: string; offset: number; dur: number; color: string };
+              const allPhases: Phase[] = [];
+              let cursor = 0;
+              if (dnsDur !== null) {
+                allPhases.push({ label: 'DNS Lookup', offset: cursor, dur: dnsDur, color: 'bg-orange-400' });
+                cursor += dnsDur;
               }
-              if (tcpDur != null && tcpDur > 0) {
-                bars.push({ label: 'TCP Connect', start: t.connectStart! - t.start, end: t.connectEnd! - t.start, color: 'bg-amber-500' });
+              if (tcpDur !== null) {
+                allPhases.push({ label: 'TCP Connect', offset: cursor, dur: tcpDur, color: 'bg-amber-500' });
+                cursor += tcpDur;
               }
-              if (reqDur > 0) {
-                bars.push({ label: 'Request', start: reqStart, end: reqEnd, color: 'bg-green-500' });
-              }
-              if (waitDur > 0) {
-                bars.push({ label: 'Waiting (TTFB)', start: waitStart, end: waitEnd, color: 'bg-blue-500' });
-              }
-              if (dlDur > 0) {
-                bars.push({ label: 'Download', start: dlStart, end: dlEnd, color: 'bg-purple-500' });
-              }
+              allPhases.push({ label: 'Request', offset: cursor, dur: reqDur, color: 'bg-green-500' });
+              cursor += reqDur;
+              allPhases.push({ label: 'Waiting (TTFB)', offset: cursor, dur: ttfbDur, color: 'bg-blue-500' });
+              cursor += ttfbDur;
+              allPhases.push({ label: 'Download', offset: cursor, dur: dlDur, color: 'bg-purple-500' });
+
+              const bars = allPhases.filter(p => p.dur > 0);
 
               // Table rows: always show all measured phases with smart labels
               const noBody = statusCode === 304 || statusCode === 204 || statusCode === 301 || statusCode === 302;
@@ -168,7 +180,7 @@ export default function TrafficDetail({ flow, onClose }: Props) {
                 tableRows.push({ label: 'TCP Connect', color: 'bg-amber-500', value: fmtDuration(tcpDur, 'reused') });
               }
               tableRows.push({ label: 'Request sent', color: 'bg-green-500', value: fmtDuration(reqDur) });
-              tableRows.push({ label: 'Waiting (TTFB)', color: 'bg-blue-500', value: fmtDuration(waitDur) });
+              tableRows.push({ label: 'Waiting (TTFB)', color: 'bg-blue-500', value: fmtDuration(ttfbDur) });
               if (noBody && dlDur === 0) {
                 tableRows.push({ label: 'Content download', color: 'bg-purple-500', value: 'no content' });
               } else {
@@ -186,13 +198,13 @@ export default function TrafficDetail({ flow, onClose }: Props) {
                         <div
                           className={`absolute top-0 h-full ${phase.color} rounded opacity-70`}
                           style={{
-                            left: `${(phase.start / total) * 100}%`,
-                            width: `${Math.max(1, ((phase.end - phase.start) / total) * 100)}%`,
+                            left: `${(phase.offset / total) * 100}%`,
+                            width: `${Math.max(1, (phase.dur / total) * 100)}%`,
                           }}
                         />
                       </div>
                       <div className="w-16 text-[11px] font-mono text-pb-text text-right shrink-0">
-                        {phase.end - phase.start}ms
+                        {phase.dur}ms
                       </div>
                     </div>
                   ))}
