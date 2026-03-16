@@ -17,7 +17,18 @@ function formatHeaders(headers?: Record<string, any>): string {
 
 function formatBody(body?: Buffer | string): string {
   if (!body) return '(empty)';
-  const text = typeof body === 'string' ? body : String(body);
+  if (typeof body !== 'string') {
+    const sample = body.subarray(0, Math.min(512, body.length));
+    let nonPrintable = 0;
+    for (let i = 0; i < sample.length; i++) {
+      const b = sample[i];
+      if (b === 0 || (b < 32 && b !== 9 && b !== 10 && b !== 13)) nonPrintable++;
+    }
+    if (nonPrintable > sample.length * 0.1) {
+      return `[binary data ${body.length} bytes]`;
+    }
+  }
+  const text = typeof body === 'string' ? body : body.toString('utf8');
   if (text.length > 2000) return text.slice(0, 2000) + '\n…truncated';
   return text;
 }
@@ -62,6 +73,14 @@ export default function BreakpointPauseDialog({ flowId, flow, phase, onResume }:
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-5 py-3 space-y-3">
+          <div className="rounded-lg border border-pb-border bg-pb-bg/50 px-3 py-2 text-[11px] text-pb-text-dim">
+            Inspection-only breakpoint: you can review the captured request/response here, then
+            <span className="text-pb-text"> Forward </span>
+            or
+            <span className="text-pb-text"> Drop</span>.
+            Request/response editing is not implemented yet.
+          </div>
+
           {/* Request headers */}
           <section>
             <h3 className="text-xs font-semibold text-pb-text-dim mb-1">Request Headers</h3>
