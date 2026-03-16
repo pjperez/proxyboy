@@ -502,23 +502,44 @@ function sanitizeFlow(flow: HttpFlow): any {
     : '';
   const isImageResponse = responseContentType.startsWith('image/');
 
+  // Detect if a Buffer contains binary (non-UTF8-safe) data
+  const isBinaryBuffer = (buf: Buffer): boolean => {
+    const sample = buf.subarray(0, Math.min(512, buf.length));
+    let nonPrintable = 0;
+    for (let i = 0; i < sample.length; i++) {
+      const b = sample[i];
+      if (b === 0 || (b < 32 && b !== 9 && b !== 10 && b !== 13)) nonPrintable++;
+    }
+    return nonPrintable > sample.length * 0.1;
+  };
+
+  const serializeBody = (body: Buffer | string | undefined, forceBase64: boolean): { text: string | undefined; isBase64: boolean } => {
+    if (!body) return { text: undefined, isBase64: false };
+    if (typeof body === 'string') return { text: body, isBase64: false };
+    if (forceBase64 || isBinaryBuffer(body)) {
+      return { text: body.toString('base64'), isBase64: true };
+    }
+    return { text: body.toString('utf8').slice(0, 100000), isBase64: false };
+  };
+
+  const reqBody = serializeBody(flow.request.body as Buffer | string | undefined, false);
+  const resBody = serializeBody(
+    flow.response?.body as Buffer | string | undefined,
+    isImageResponse,
+  );
+
   return {
     ...flow,
     request: {
       ...flow.request,
-      body: flow.request.body
-        ? (typeof flow.request.body === 'string' ? flow.request.body : flow.request.body.toString('utf8').slice(0, 10000))
-        : undefined,
+      body: reqBody.text,
+      _isBase64: reqBody.isBase64 || undefined,
     },
     response: flow.response
       ? {
           ...flow.response,
-          body: flow.response.body
-            ? isImageResponse
-              ? (typeof flow.response.body === 'string' ? flow.response.body : flow.response.body.toString('base64'))
-              : (typeof flow.response.body === 'string' ? flow.response.body : flow.response.body.toString('utf8').slice(0, 10000))
-            : undefined,
-          _isBase64: isImageResponse && flow.response.body ? true : undefined,
+          body: resBody.text,
+          _isBase64: resBody.isBase64 || undefined,
         }
       : undefined,
   };

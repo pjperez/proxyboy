@@ -1,5 +1,4 @@
 import React, { useMemo, useState } from 'react';
-import pako from 'pako';
 
 interface Props {
   body: string;
@@ -13,35 +12,25 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function looksCompressed(str: string): boolean {
-  // Check for common garbled gzip/deflate patterns (non-printable chars in first 20 bytes)
-  const sample = str.slice(0, 40);
-  let nonPrintable = 0;
-  for (let i = 0; i < sample.length; i++) {
-    const c = sample.charCodeAt(i);
-    if (c < 32 && c !== 9 && c !== 10 && c !== 13) nonPrintable++;
-    if (c > 126 && c < 160) nonPrintable++;
-  }
-  return nonPrintable > sample.length * 0.3;
-}
-
-function tryDecompress(str: string): string | null {
+function base64Decode(b64: string): string | null {
   try {
-    // Convert the garbled UTF-8 string back to bytes
-    const bytes = new Uint8Array(str.length);
-    for (let i = 0; i < str.length; i++) {
-      bytes[i] = str.charCodeAt(i) & 0xff;
-    }
-    // Try gzip first
+    const binary = atob(b64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+    // Try gzip
     if (bytes[0] === 0x1f && bytes[1] === 0x8b) {
-      return pako.ungzip(bytes, { to: 'string' });
+      const { ungzip } = require('pako') as typeof import('pako');
+      return ungzip(bytes, { to: 'string' });
     }
-    // Try inflate (raw deflate or zlib)
-    try {
-      return pako.inflate(bytes, { to: 'string' });
-    } catch {
-      return pako.inflateRaw(bytes, { to: 'string' });
+    // Try deflate
+    if (bytes[0] === 0x78) {
+      const { inflate } = require('pako') as typeof import('pako');
+      return inflate(bytes, { to: 'string' });
     }
+    // Not compressed — try decoding as UTF-8
+    const decoder = new TextDecoder('utf-8', { fatal: true });
+    return decoder.decode(bytes);
   } catch {
     return null;
   }
@@ -49,15 +38,15 @@ function tryDecompress(str: string): string | null {
 
 export default function BodyViewer({ body, contentType, isBase64 }: Props) {
   const isImage = contentType.startsWith('image/');
-  const compressed = useMemo(() => !isImage && looksCompressed(body), [body, isImage]);
   const [showDecoded, setShowDecoded] = useState(true);
 
+  // For base64 non-image bodies, attempt to decode/decompress
   const decoded = useMemo(() => {
-    if (!compressed || !showDecoded) return null;
-    return tryDecompress(body);
-  }, [body, compressed, showDecoded]);
+    if (!isBase64 || isImage || !showDecoded) return null;
+    return base64Decode(body);
+  }, [body, isBase64, isImage, showDecoded]);
 
-  const displayBody = decoded ?? body;
+  const displayBody = (isBase64 && !isImage) ? (decoded ?? `[Binary data, ${formatSize(body.length * 0.75)} estimated]`) : body;
 
   const formatted = useMemo(() => {
     if (isImage) return displayBody;
@@ -103,10 +92,10 @@ export default function BodyViewer({ body, contentType, isBase64 }: Props) {
 
   return (
     <div className="bg-pb-bg rounded border border-pb-border overflow-auto max-h-96">
-      {compressed && (
+      {isBase64 && !isImage && (
         <div className="flex items-center gap-2 px-3 py-1.5 border-b border-pb-border bg-pb-surface">
           <span className="text-[10px] text-pb-text-dim">
-            {decoded ? '✓ Decoded' : '⚠ Compressed'}
+            {decoded ? '✓ Decoded' : '⚠ Binary'}
           </span>
           <button
             onClick={() => setShowDecoded(!showDecoded)}
