@@ -8,11 +8,22 @@ export default function SettingsPanel() {
   );
   const [certStatus, setCertStatus] = useState<'checking' | 'installed' | 'not-installed'>('checking');
   const [installing, setInstalling] = useState(false);
+  const [dnsMode, setDnsMode] = useState<'system' | 'custom'>('system');
+  const [dnsServers, setDnsServers] = useState('');
+  const [dnsApplied, setDnsApplied] = useState(false);
 
   useEffect(() => {
     window.proxyboy?.proxy.getCertStatus().then((status: { installed: boolean }) => {
       setCertStatus(status.installed ? 'installed' : 'not-installed');
     }).catch(() => setCertStatus('not-installed'));
+
+    // Load DNS config
+    window.proxyboy?.dns.getConfig().then((config: { mode: string; servers: string[] }) => {
+      if (config.mode === 'custom') {
+        setDnsMode('custom');
+        setDnsServers(config.servers.join(', '));
+      }
+    }).catch(() => {});
   }, []);
 
   const handleAutoStartToggle = () => {
@@ -31,6 +42,32 @@ export default function SettingsPanel() {
     } finally {
       setInstalling(false);
     }
+  };
+
+  const handleDnsModeChange = (mode: 'system' | 'custom') => {
+    setDnsMode(mode);
+    setDnsApplied(false);
+    if (mode === 'system') {
+      setDnsServers('');
+      window.proxyboy?.dns.setServers([]);
+      setDnsApplied(true);
+      setTimeout(() => setDnsApplied(false), 2000);
+    }
+  };
+
+  const handleApplyDns = () => {
+    const servers = dnsServers
+      .split(/[,\s]+/)
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+    window.proxyboy?.dns.setServers(servers).then(() => {
+      setDnsApplied(true);
+      setTimeout(() => setDnsApplied(false), 2000);
+    });
+  };
+
+  const handleClearDnsCache = () => {
+    window.proxyboy?.dns.clearCache();
   };
 
   return (
@@ -66,6 +103,63 @@ export default function SettingsPanel() {
               disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {installing ? 'Installing…' : certStatus === 'installed' ? 'Installed' : 'Install Certificate'}
+          </button>
+        </Row>
+      </Section>
+
+      {/* DNS */}
+      <Section title="DNS">
+        <Row label="DNS resolver">
+          <div className="flex gap-2">
+            <button
+              onClick={() => handleDnsModeChange('system')}
+              className={`px-3 py-1.5 rounded text-sm transition-colors ${
+                dnsMode === 'system'
+                  ? 'bg-pb-accent/20 text-pb-accent border border-pb-accent/40'
+                  : 'text-pb-text border border-pb-border hover:bg-pb-surface-hover'
+              }`}
+            >
+              System DNS
+            </button>
+            <button
+              onClick={() => handleDnsModeChange('custom')}
+              className={`px-3 py-1.5 rounded text-sm transition-colors ${
+                dnsMode === 'custom'
+                  ? 'bg-pb-accent/20 text-pb-accent border border-pb-accent/40'
+                  : 'text-pb-text border border-pb-border hover:bg-pb-surface-hover'
+              }`}
+            >
+              Custom
+            </button>
+          </div>
+        </Row>
+        {dnsMode === 'custom' && (
+          <Row label="DNS servers">
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                value={dnsServers}
+                onChange={(e) => { setDnsServers(e.target.value); setDnsApplied(false); }}
+                placeholder="8.8.8.8, 1.1.1.1"
+                className="bg-pb-bg border border-pb-border rounded px-3 py-1.5 text-sm text-pb-text font-mono w-56
+                  focus:outline-none focus:border-pb-accent"
+              />
+              <button
+                onClick={handleApplyDns}
+                className="px-3 py-1.5 rounded text-sm font-medium bg-pb-accent text-pb-bg hover:bg-pb-accent/80"
+              >
+                Apply
+              </button>
+              {dnsApplied && <span className="text-xs text-pb-success">✓</span>}
+            </div>
+          </Row>
+        )}
+        <Row label="DNS cache">
+          <button
+            onClick={handleClearDnsCache}
+            className="px-3 py-1.5 rounded text-sm text-pb-text border border-pb-border hover:bg-pb-surface-hover"
+          >
+            Clear cache
           </button>
         </Row>
       </Section>

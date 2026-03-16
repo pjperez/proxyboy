@@ -120,18 +120,40 @@ export default function TrafficDetail({ flow, onClose }: Props) {
               const total = flow.response!.duration || 1;
               const phases: { label: string; start: number; end: number; color: string }[] = [];
 
+              // DNS lookup
+              if (t.dnsStart != null && t.dnsEnd != null && t.dnsEnd > t.dnsStart) {
+                phases.push({
+                  label: 'DNS Lookup',
+                  start: t.dnsStart - t.start,
+                  end: t.dnsEnd - t.start,
+                  color: 'bg-orange-400',
+                });
+              }
+
+              // TCP Connect
+              if (t.connectStart != null && t.connectEnd != null && t.connectEnd > t.connectStart) {
+                phases.push({
+                  label: 'TCP Connect',
+                  start: t.connectStart - t.start,
+                  end: t.connectEnd - t.start,
+                  color: 'bg-amber-500',
+                });
+              }
+
               // Request sending
-              if (t.requestEnd) {
+              const reqStart = (t.connectEnd ?? t.dnsEnd ?? t.start) - t.start;
+              const reqEnd = t.requestEnd ? t.requestEnd - t.start : reqStart;
+              if (reqEnd > reqStart) {
                 phases.push({
                   label: 'Request',
-                  start: 0,
-                  end: t.requestEnd - t.start,
+                  start: reqStart,
+                  end: reqEnd,
                   color: 'bg-green-500',
                 });
               }
 
               // Waiting (TTFB) — from request end to first response byte
-              const waitStart = (t.requestEnd ?? t.start) - t.start;
+              const waitStart = (t.requestEnd ?? t.connectEnd ?? t.start) - t.start;
               const waitEnd = (t.firstByte ?? t.responseStart ?? t.responseEnd ?? t.start) - t.start;
               if (waitEnd > waitStart) {
                 phases.push({
@@ -180,21 +202,48 @@ export default function TrafficDetail({ flow, onClose }: Props) {
                   <div className="mt-4 border border-pb-border rounded bg-pb-surface">
                     <table className="w-full text-xs">
                       <tbody>
-                        {t.requestEnd && (
+                        {t.dnsStart != null && t.dnsEnd != null && t.dnsEnd > t.dnsStart && (
                           <tr className="border-b border-pb-border">
-                            <td className="px-3 py-1.5 text-pb-text-dim">Request sent</td>
-                            <td className="px-3 py-1.5 font-mono text-right">{t.requestEnd - t.start}ms</td>
+                            <td className="px-3 py-1.5 text-pb-text-dim flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-orange-400 inline-block" />
+                              DNS Lookup
+                            </td>
+                            <td className="px-3 py-1.5 font-mono text-right">{t.dnsEnd - t.dnsStart}ms</td>
+                          </tr>
+                        )}
+                        {t.connectStart != null && t.connectEnd != null && t.connectEnd > t.connectStart && (
+                          <tr className="border-b border-pb-border">
+                            <td className="px-3 py-1.5 text-pb-text-dim flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-amber-500 inline-block" />
+                              TCP Connect
+                            </td>
+                            <td className="px-3 py-1.5 font-mono text-right">{t.connectEnd - t.connectStart}ms</td>
+                          </tr>
+                        )}
+                        {reqEnd > reqStart && (
+                          <tr className="border-b border-pb-border">
+                            <td className="px-3 py-1.5 text-pb-text-dim flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
+                              Request sent
+                            </td>
+                            <td className="px-3 py-1.5 font-mono text-right">{reqEnd - reqStart}ms</td>
                           </tr>
                         )}
                         {waitEnd > waitStart && (
                           <tr className="border-b border-pb-border">
-                            <td className="px-3 py-1.5 text-pb-text-dim">Waiting (TTFB)</td>
+                            <td className="px-3 py-1.5 text-pb-text-dim flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" />
+                              Waiting (TTFB)
+                            </td>
                             <td className="px-3 py-1.5 font-mono text-right">{waitEnd - waitStart}ms</td>
                           </tr>
                         )}
                         {dlEnd > dlStart && (
                           <tr className="border-b border-pb-border">
-                            <td className="px-3 py-1.5 text-pb-text-dim">Content download</td>
+                            <td className="px-3 py-1.5 text-pb-text-dim flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-purple-500 inline-block" />
+                              Content download
+                            </td>
                             <td className="px-3 py-1.5 font-mono text-right">{dlEnd - dlStart}ms</td>
                           </tr>
                         )}

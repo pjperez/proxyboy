@@ -107,6 +107,13 @@ const api = {
   debug: {
     getInterceptorState: () => ipcRenderer.invoke('debug:interceptor-state'),
   },
+
+  // DNS
+  dns: {
+    getConfig: () => ipcRenderer.invoke(IPC_CHANNELS.DNS_GET_CONFIG),
+    setServers: (servers: string[]) => ipcRenderer.invoke(IPC_CHANNELS.DNS_SET_SERVERS, servers),
+    clearCache: () => ipcRenderer.invoke(IPC_CHANNELS.DNS_CLEAR_CACHE),
+  },
 };
 
 export type ProxyBoyAPI = typeof api;
