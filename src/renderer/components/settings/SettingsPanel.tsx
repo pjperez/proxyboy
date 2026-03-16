@@ -11,6 +11,7 @@ export default function SettingsPanel() {
   const [dnsMode, setDnsMode] = useState<'system' | 'custom'>('system');
   const [dnsServers, setDnsServers] = useState('');
   const [dnsApplied, setDnsApplied] = useState(false);
+  const [dnsError, setDnsError] = useState<string | null>(null);
 
   useEffect(() => {
     window.proxyboy?.proxy.getCertStatus().then((status: { installed: boolean }) => {
@@ -44,26 +45,36 @@ export default function SettingsPanel() {
     }
   };
 
-  const handleDnsModeChange = (mode: 'system' | 'custom') => {
+  const handleDnsModeChange = async (mode: 'system' | 'custom') => {
     setDnsMode(mode);
     setDnsApplied(false);
+    setDnsError(null);
     if (mode === 'system') {
       setDnsServers('');
-      window.proxyboy?.dns.setServers([]);
-      setDnsApplied(true);
-      setTimeout(() => setDnsApplied(false), 2000);
+      const result = await window.proxyboy?.dns.setServers([]);
+      if (result?.success) {
+        setDnsApplied(true);
+        setTimeout(() => setDnsApplied(false), 2000);
+      } else {
+        setDnsError(result?.error || 'Failed to switch back to system DNS');
+      }
     }
   };
 
-  const handleApplyDns = () => {
+  const handleApplyDns = async () => {
     const servers = dnsServers
       .split(/[,\s]+/)
       .map(s => s.trim())
       .filter(s => s.length > 0);
-    window.proxyboy?.dns.setServers(servers).then(() => {
+    setDnsError(null);
+    const result = await window.proxyboy?.dns.setServers(servers);
+    if (result?.success) {
       setDnsApplied(true);
       setTimeout(() => setDnsApplied(false), 2000);
-    });
+      return;
+    }
+    setDnsApplied(false);
+    setDnsError(result?.error || 'Failed to apply DNS servers');
   };
 
   const handleClearDnsCache = () => {
@@ -135,22 +146,29 @@ export default function SettingsPanel() {
         </Row>
         {dnsMode === 'custom' && (
           <Row label="DNS servers">
-            <div className="flex items-center gap-2">
-              <input
-                type="text"
-                value={dnsServers}
-                onChange={(e) => { setDnsServers(e.target.value); setDnsApplied(false); }}
-                placeholder="8.8.8.8, 1.1.1.1"
-                className="bg-pb-bg border border-pb-border rounded px-3 py-1.5 text-sm text-pb-text font-mono w-56
-                  focus:outline-none focus:border-pb-accent"
-              />
-              <button
-                onClick={handleApplyDns}
-                className="px-3 py-1.5 rounded text-sm font-medium bg-pb-accent text-pb-bg hover:bg-pb-accent/80"
-              >
-                Apply
-              </button>
-              {dnsApplied && <span className="text-xs text-pb-success">✓</span>}
+            <div className="flex flex-col items-end gap-1">
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={dnsServers}
+                  onChange={(e) => {
+                    setDnsServers(e.target.value);
+                    setDnsApplied(false);
+                    setDnsError(null);
+                  }}
+                  placeholder="8.8.8.8, 1.1.1.1"
+                  className="bg-pb-bg border border-pb-border rounded px-3 py-1.5 text-sm text-pb-text font-mono w-56
+                    focus:outline-none focus:border-pb-accent"
+                />
+                <button
+                  onClick={handleApplyDns}
+                  className="px-3 py-1.5 rounded text-sm font-medium bg-pb-accent text-pb-bg hover:bg-pb-accent/80"
+                >
+                  Apply
+                </button>
+                {dnsApplied && <span className="text-xs text-pb-success">✓</span>}
+              </div>
+              {dnsError && <span className="text-xs text-pb-error">{dnsError}</span>}
             </div>
           </Row>
         )}
