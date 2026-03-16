@@ -273,7 +273,17 @@ export class ProxyEngine extends EventEmitter {
         if (responseBreakRule) {
           this.emit('breakpoint:paused', { flowId, flow, phase: 'response' });
           this.interceptor.pauseFlow(flowId, flow).then(action => {
-            if (action === 'drop') return;
+            if (action === 'drop') {
+              try {
+                ctx.proxyToClientResponse.writeHead(502, { 'Content-Type': 'text/plain' });
+                ctx.proxyToClientResponse.end('Dropped by ProxyBoy breakpoint');
+              } catch { /* connection may already be closed */ }
+              flow.state = 'blocked';
+              flow.tags.push('breakpoint-dropped');
+              this.flows.set(flowId, flow);
+              this.emit('flow:complete', flow);
+              return;
+            }
             cb();
           });
           return;
@@ -339,7 +349,17 @@ export class ProxyEngine extends EventEmitter {
       if (breakRule) {
         this.emit('breakpoint:paused', { flowId, flow, phase: 'request' });
         this.interceptor.pauseFlow(flowId, flow).then(action => {
-          if (action === 'drop') return;
+          if (action === 'drop') {
+            try {
+              ctx.proxyToClientResponse.writeHead(502, { 'Content-Type': 'text/plain' });
+              ctx.proxyToClientResponse.end('Dropped by ProxyBoy breakpoint');
+            } catch { /* connection may already be closed */ }
+            flow.state = 'blocked';
+            flow.tags.push('breakpoint-dropped');
+            this.flows.set(flowId, flow);
+            this.emit('flow:complete', flow);
+            return;
+          }
           this.resolveAndConnect(flow, ctx, callback);
         });
         return;

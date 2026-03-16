@@ -113,7 +113,9 @@ export function searchFlows(query: string): HttpFlow[] {
     FROM flows f
     JOIN requests r ON r.flow_id = f.id
     LEFT JOIN responses res ON res.flow_id = f.id
-    WHERE r.url LIKE ? OR r.body LIKE ? OR res.body LIKE ?
+    WHERE r.url LIKE ?
+       OR (r.body LIKE ? AND COALESCE(r.body_encoding, 'utf8') != 'base64')
+       OR (res.body LIKE ? AND COALESCE(res.body_encoding, 'utf8') != 'base64')
     ORDER BY f.created_at DESC
     LIMIT 500
   `, [pattern, pattern, pattern]);

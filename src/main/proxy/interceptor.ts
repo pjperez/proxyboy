@@ -117,7 +117,11 @@ export class Interceptor {
         return null;
       }
 
-      // Block paths outside user home directory
+      // Block paths outside user home directory.
+      // This is intentionally restrictive — users who need files from other
+      // drives can copy/symlink them into their home directory. Relaxing this
+      // would allow the AI agent's createMapLocalRule tool to read arbitrary
+      // system files.
       const userHome = os.homedir();
       if (!lowerPath.startsWith(userHome.toLowerCase())) {
         console.warn('[Interceptor] Map-local path blocked (outside user home):', resolvedPath);
