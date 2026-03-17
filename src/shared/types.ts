@@ -77,6 +77,7 @@ export interface ProxyState {
 // Filter types
 export interface FilterCriteria {
   text?: string;
+  searchBodies?: boolean;
   methods?: string[];
   statusCodes?: StatusCodeRange[];
   contentTypes?: string[];

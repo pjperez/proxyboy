@@ -22,6 +22,7 @@ ProxyBoy is a man-in-the-middle (MITM) HTTP/HTTPS proxy that captures, inspects,
 - **System Proxy Integration** — Toggle Windows system proxy on/off from the app
 - **HAR Export/Import** — Standard HAR format for sharing captures with other tools
 - **Configurable Columns** — Show/hide columns, sort by any field, timestamps
+- **Body Search** — Include request and response text bodies in traffic filtering when you need deeper search
 - **Copy as cURL** — Right-click any request to copy it as a cURL command
 - **Dark Theme** — Tokyo Night-inspired dark UI
 - **Detachable AI Panel** — Pop the assistant out into its own window
