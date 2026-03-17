@@ -146,6 +146,12 @@ export function clearAllFlows(): void {
   schedulePersist();
 }
 
+export function deleteFlow(id: string): void {
+  const db = getDatabase();
+  db.run('DELETE FROM flows WHERE id = ?', [id]);
+  schedulePersist();
+}
+
 export function saveRule(rule: Rule): void {
   const db = getDatabase();
   db.run(

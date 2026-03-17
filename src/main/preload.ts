@@ -20,6 +20,7 @@ const api = {
     getFlow: (id: string): Promise<HttpFlow | null> =>
       ipcRenderer.invoke(IPC_CHANNELS.TRAFFIC_GET_FLOW, id),
     clear: () => ipcRenderer.invoke(IPC_CHANNELS.TRAFFIC_CLEAR),
+    delete: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TRAFFIC_DELETE, id),
     onNewFlow: (callback: (flow: HttpFlow) => void) => {
       const handler = (_event: any, flow: HttpFlow) => callback(flow);
       ipcRenderer.on(IPC_CHANNELS.TRAFFIC_NEW_FLOW, handler);

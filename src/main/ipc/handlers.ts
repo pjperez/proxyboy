@@ -8,7 +8,7 @@ import { setSystemProxy, clearSystemProxy, isSystemProxyEnabled } from '../utils
 import { ProxyState, Rule, HttpFlow } from '../../shared/types';
 import { flowsToHar } from '../utils/har';
 import { randomUUID } from 'crypto';
-import { saveFlow, clearAllFlows, saveRule, getRules, getFlows as getStoredFlows, deleteRule as dbDeleteRule } from '../storage/queries';
+import { saveFlow, clearAllFlows, saveRule, getRules, getFlows as getStoredFlows, deleteRule as dbDeleteRule, deleteFlow as deleteStoredFlow } from '../storage/queries';
 import * as fs from 'fs';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
@@ -122,6 +122,25 @@ export function registerIpcHandlers(
     try {
       proxyEngine.clearFlows();
       clearAllFlows();
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TRAFFIC_DELETE, (_event, id: string) => {
+    try {
+      const flow = proxyEngine.getFlow(id);
+      if (!flow) {
+        return { success: false, error: 'That request is no longer available.' };
+      }
+
+      if (!['complete', 'error', 'blocked'].includes(flow.state)) {
+        return { success: false, error: 'Only completed requests can be removed from the list.' };
+      }
+
+      proxyEngine.deleteFlow(id);
+      deleteStoredFlow(id);
       return { success: true };
     } catch (error: any) {
       return { success: false, error: error.message };
