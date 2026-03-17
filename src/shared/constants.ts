@@ -45,6 +45,7 @@ export const IPC_CHANNELS = {
   APP_GET_VERSION: 'app:get-version',
   APP_EXPORT_HAR: 'app:export-har',
   APP_IMPORT_HAR: 'app:import-har',
+  APP_PICK_FILE: 'app:pick-file',
 
   // DNS
   DNS_GET_CONFIG: 'dns:get-config',

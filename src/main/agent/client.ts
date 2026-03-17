@@ -10,6 +10,40 @@ import { IPC_CHANNELS } from '../../shared/constants';
 import { HttpFlow, Rule, BreakpointRule, MapLocalRule } from '../../shared/types';
 import { randomUUID } from 'crypto';
 
+const SENSITIVE_HEADERS = new Set([
+  'authorization',
+  'proxy-authorization',
+  'cookie',
+  'set-cookie',
+  'x-api-key',
+  'x-auth-token',
+]);
+
+function redactHeaders(headers: Record<string, unknown>): Record<string, unknown> {
+  const safe: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    safe[key] = SENSITIVE_HEADERS.has(key.toLowerCase()) ? '[REDACTED]' : value;
+  }
+  return safe;
+}
+
+function previewBody(body?: Buffer | string): string | null {
+  if (!body) return null;
+  if (Buffer.isBuffer(body)) {
+    const sample = body.subarray(0, Math.min(512, body.length));
+    let nonPrintable = 0;
+    for (let i = 0; i < sample.length; i++) {
+      const b = sample[i];
+      if (b === 0 || (b < 32 && b !== 9 && b !== 10 && b !== 13)) nonPrintable++;
+    }
+    if (nonPrintable > sample.length * 0.1) {
+      return `[binary data ${body.length} bytes]`;
+    }
+    return body.toString('utf8').slice(0, 5000);
+  }
+  return body.slice(0, 5000);
+}
+
 export interface RuleManager {
   createRule(rule: Rule): void;
 }
@@ -126,8 +160,22 @@ export class AgentClient {
           const flow = engine.getFlow(args.flowId);
           if (!flow) return { error: 'Flow not found' };
           return {
-            id: flow.id, request: { method: flow.request.method, url: flow.request.url, headers: flow.request.headers, bodySize: flow.request.bodySize, body: flow.request.body ? String(flow.request.body).slice(0, 5000) : null },
-            response: flow.response ? { statusCode: flow.response.statusCode, statusMessage: flow.response.statusMessage, headers: flow.response.headers, bodySize: flow.response.bodySize, body: flow.response.body ? String(flow.response.body).slice(0, 5000) : null, duration: flow.response.duration } : null,
+            id: flow.id,
+            request: {
+              method: flow.request.method,
+              url: flow.request.url,
+              headers: redactHeaders(flow.request.headers),
+              bodySize: flow.request.bodySize,
+              body: previewBody(flow.request.body),
+            },
+            response: flow.response ? {
+              statusCode: flow.response.statusCode,
+              statusMessage: flow.response.statusMessage,
+              headers: redactHeaders(flow.response.headers),
+              bodySize: flow.response.bodySize,
+              body: previewBody(flow.response.body),
+              duration: flow.response.duration,
+            } : null,
             state: flow.state, tags: flow.tags,
           };
         },

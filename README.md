@@ -141,7 +141,7 @@ src/
 - **No request/response editing in breakpoints** — You can inspect and forward/drop, but not modify (yet)
 - **SSL inspection quirks** — Some sites with certificate pinning or HSTS preload may not work through the proxy
 - **Cloudflare challenges** — Sites behind Cloudflare browser challenges will typically fail through any MITM proxy
-- **No tests** — This is a weekend project, not a production app 🙃
+- **Very limited automated tests** — There is a small test foothold now, but coverage is still far from production-ready 🙃
 
 ---
 

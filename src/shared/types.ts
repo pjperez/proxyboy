@@ -56,6 +56,11 @@ export interface DnsConfig {
   servers: string[];
 }
 
+export interface StoredBody {
+  data: string;
+  encoding: 'utf8' | 'base64';
+}
+
 export type FlowState = 'pending' | 'complete' | 'error' | 'paused' | 'blocked';
 
 // Proxy state
@@ -170,6 +175,4 @@ export interface BreakpointPauseMessage {
 export interface BreakpointResumeMessage {
   flowId: string;
   action: 'forward' | 'drop';
-  modifiedRequest?: Partial<HttpRequest>;
-  modifiedResponse?: Partial<HttpResponse>;
 }

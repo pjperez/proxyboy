@@ -3,7 +3,7 @@ import * as path from 'path';
 import { ProxyEngine } from './proxy/engine';
 import { CertificateManager } from './proxy/certificate';
 import { registerIpcHandlers } from './ipc/handlers';
-import { initDatabase, closeDatabase } from './storage/database';
+import { initDatabase, closeDatabase, persistDatabase } from './storage/database';
 import { clearSystemProxy } from './utils/windows-proxy';
 import { DEFAULT_PROXY_PORT, DEFAULT_PROXY_HOST } from '../shared/constants';
 
@@ -33,7 +33,7 @@ const createWindow = (): void => {
       contextIsolation: true,
       nodeIntegration: false,
       webSecurity: true,
-      sandbox: false,
+      sandbox: true,
     },
   });
 
@@ -87,7 +87,16 @@ app.whenReady().then(async () => {
   app.quit();
 });
 
+app.on('before-quit', () => {
+  try {
+    persistDatabase();
+  } catch (error) {
+    console.error('Failed to persist database before quit:', error);
+  }
+});
+
 app.on('window-all-closed', async () => {
+  try { persistDatabase(); } catch {}
   try { await clearSystemProxy(); } catch {}
   if (proxyEngine?.isRunning()) {
     await proxyEngine.stop();

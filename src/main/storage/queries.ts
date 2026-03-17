@@ -1,35 +1,68 @@
 import { getDatabase, schedulePersist } from './database';
-import { HttpFlow, HttpRequest, HttpResponse, Rule } from '../../shared/types';
+import { FlowTiming, HttpFlow, HttpRequest, HttpResponse, Rule, StoredBody } from '../../shared/types';
+
+function isProbablyTextBuffer(buf: Buffer): boolean {
+  const sample = buf.subarray(0, Math.min(512, buf.length));
+  let nonPrintable = 0;
+  for (let i = 0; i < sample.length; i++) {
+    const b = sample[i];
+    if (b === 0 || (b < 32 && b !== 9 && b !== 10 && b !== 13)) nonPrintable++;
+  }
+  return nonPrintable <= sample.length * 0.1;
+}
+
+function encodeBody(body?: Buffer | string): StoredBody | null {
+  if (!body) return null;
+  if (typeof body === 'string') {
+    return { data: body, encoding: 'utf8' };
+  }
+  if (isProbablyTextBuffer(body)) {
+    return { data: body.toString('utf8'), encoding: 'utf8' };
+  }
+  return { data: body.toString('base64'), encoding: 'base64' };
+}
+
+function decodeBody(data?: string, encoding?: string): Buffer | string | undefined {
+  if (!data) return undefined;
+  if (encoding === 'base64') {
+    return Buffer.from(data, 'base64');
+  }
+  return data;
+}
 
 export function saveFlow(flow: HttpFlow): void {
   const db = getDatabase();
+  const requestBody = encodeBody(flow.request.body);
+  const responseBody = encodeBody(flow.response?.body);
 
   db.run(
-    `INSERT OR REPLACE INTO flows (id, state, tags, notes, created_at) VALUES (?, ?, ?, ?, ?)`,
-    [flow.id, flow.state, JSON.stringify(flow.tags), flow.notes || null, flow.createdAt],
+    `INSERT OR REPLACE INTO flows (id, state, tags, notes, created_at, timing) VALUES (?, ?, ?, ?, ?, ?)`,
+    [flow.id, flow.state, JSON.stringify(flow.tags), flow.notes || null, flow.createdAt, flow.timing ? JSON.stringify(flow.timing) : null],
   );
 
   db.run(
-    `INSERT OR REPLACE INTO requests (id, flow_id, method, url, protocol, host, path, headers, body, body_size, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO requests (id, flow_id, method, url, protocol, host, path, headers, body, body_encoding, body_size, timestamp)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       flow.request.id, flow.id, flow.request.method, flow.request.url,
       flow.request.protocol, flow.request.host, flow.request.path,
       JSON.stringify(flow.request.headers),
-      flow.request.body ? String(flow.request.body) : null,
+      requestBody?.data || null,
+      requestBody?.encoding || null,
       flow.request.bodySize, flow.request.timestamp,
     ],
   );
 
   if (flow.response) {
     db.run(
-      `INSERT OR REPLACE INTO responses (id, request_id, flow_id, status_code, status_message, headers, body, body_size, timestamp, duration)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO responses (id, request_id, flow_id, status_code, status_message, headers, body, body_encoding, body_size, timestamp, duration)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         flow.response.id, flow.response.requestId, flow.id,
         flow.response.statusCode, flow.response.statusMessage,
         JSON.stringify(flow.response.headers),
-        flow.response.body ? String(flow.response.body) : null,
+        responseBody?.data || null,
+        responseBody?.encoding || null,
         flow.response.bodySize, flow.response.timestamp, flow.response.duration,
       ],
     );
@@ -54,11 +87,11 @@ function queryFlows(sql: string, params: any[] = []): HttpFlow[] {
 
 export function getFlows(limit = 1000, offset = 0): HttpFlow[] {
   return queryFlows(`
-    SELECT f.id, f.state, f.tags, f.notes, f.created_at,
+    SELECT f.id, f.state, f.tags, f.notes, f.created_at, f.timing,
            r.id as req_id, r.method, r.url, r.protocol, r.host, r.path,
-           r.headers as req_headers, r.body as req_body, r.body_size as req_body_size, r.timestamp as req_timestamp,
+           r.headers as req_headers, r.body as req_body, r.body_encoding as req_body_encoding, r.body_size as req_body_size, r.timestamp as req_timestamp,
            res.id as res_id, res.status_code, res.status_message,
-           res.headers as res_headers, res.body as res_body, res.body_size as res_body_size,
+           res.headers as res_headers, res.body as res_body, res.body_encoding as res_body_encoding, res.body_size as res_body_size,
            res.timestamp as res_timestamp, res.duration
     FROM flows f
     JOIN requests r ON r.flow_id = f.id
@@ -71,16 +104,18 @@ export function getFlows(limit = 1000, offset = 0): HttpFlow[] {
 export function searchFlows(query: string): HttpFlow[] {
   const pattern = `%${query}%`;
   return queryFlows(`
-    SELECT f.id, f.state, f.tags, f.notes, f.created_at,
+    SELECT f.id, f.state, f.tags, f.notes, f.created_at, f.timing,
            r.id as req_id, r.method, r.url, r.protocol, r.host, r.path,
-           r.headers as req_headers, r.body as req_body, r.body_size as req_body_size, r.timestamp as req_timestamp,
+           r.headers as req_headers, r.body as req_body, r.body_encoding as req_body_encoding, r.body_size as req_body_size, r.timestamp as req_timestamp,
            res.id as res_id, res.status_code, res.status_message,
-           res.headers as res_headers, res.body as res_body, res.body_size as res_body_size,
+           res.headers as res_headers, res.body as res_body, res.body_encoding as res_body_encoding, res.body_size as res_body_size,
            res.timestamp as res_timestamp, res.duration
     FROM flows f
     JOIN requests r ON r.flow_id = f.id
     LEFT JOIN responses res ON res.flow_id = f.id
-    WHERE r.url LIKE ? OR r.body LIKE ? OR res.body LIKE ?
+    WHERE r.url LIKE ?
+       OR (r.body LIKE ? AND COALESCE(r.body_encoding, 'utf8') != 'base64')
+       OR (res.body LIKE ? AND COALESCE(res.body_encoding, 'utf8') != 'base64')
     ORDER BY f.created_at DESC
     LIMIT 500
   `, [pattern, pattern, pattern]);
@@ -88,11 +123,11 @@ export function searchFlows(query: string): HttpFlow[] {
 
 export function getErrorFlows(): HttpFlow[] {
   return queryFlows(`
-    SELECT f.id, f.state, f.tags, f.notes, f.created_at,
+    SELECT f.id, f.state, f.tags, f.notes, f.created_at, f.timing,
            r.id as req_id, r.method, r.url, r.protocol, r.host, r.path,
-           r.headers as req_headers, r.body as req_body, r.body_size as req_body_size, r.timestamp as req_timestamp,
+           r.headers as req_headers, r.body as req_body, r.body_encoding as req_body_encoding, r.body_size as req_body_size, r.timestamp as req_timestamp,
            res.id as res_id, res.status_code, res.status_message,
-           res.headers as res_headers, res.body as res_body, res.body_size as res_body_size,
+           res.headers as res_headers, res.body as res_body, res.body_encoding as res_body_encoding, res.body_size as res_body_size,
            res.timestamp as res_timestamp, res.duration
     FROM flows f
     JOIN requests r ON r.flow_id = f.id
@@ -152,7 +187,7 @@ function rowToFlow(row: any): HttpFlow {
     host: row.host,
     path: row.path,
     headers: JSON.parse(row.req_headers || '{}'),
-    body: row.req_body || undefined,
+    body: decodeBody(row.req_body as string | undefined, row.req_body_encoding as string | undefined),
     bodySize: row.req_body_size || 0,
     timestamp: row.req_timestamp,
   };
@@ -165,7 +200,7 @@ function rowToFlow(row: any): HttpFlow {
       statusCode: row.status_code,
       statusMessage: row.status_message || '',
       headers: JSON.parse(row.res_headers || '{}'),
-      body: row.res_body || undefined,
+      body: decodeBody(row.res_body as string | undefined, row.res_body_encoding as string | undefined),
       bodySize: row.res_body_size || 0,
       timestamp: row.res_timestamp,
       duration: row.duration || 0,
@@ -180,5 +215,6 @@ function rowToFlow(row: any): HttpFlow {
     tags: JSON.parse(row.tags || '[]'),
     notes: row.notes || undefined,
     createdAt: row.created_at,
+    timing: row.timing ? JSON.parse(row.timing as string) as FlowTiming : undefined,
   };
 }

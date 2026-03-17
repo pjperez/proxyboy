@@ -49,6 +49,15 @@ export default function MapLocalEditor() {
     await loadRules();
   }, [loadRules]);
 
+  const handleBrowse = useCallback(async () => {
+    const api = (window as any).proxyboy;
+    if (!api?.app?.pickFile) return;
+    const result = await api.app.pickFile();
+    if (result?.success && result.path) {
+      setLocalFilePath(result.path);
+    }
+  }, []);
+
   return (
     <div className="flex flex-col h-full p-4">
       <div className="flex items-center justify-between mb-4">
@@ -77,13 +86,21 @@ export default function MapLocalEditor() {
             placeholder="URL pattern (e.g., */api/users*)"
             className="w-full h-8 bg-pb-bg border border-pb-border rounded px-3 text-xs text-pb-text font-mono placeholder-pb-text-dim focus:outline-none focus:border-pb-accent"
           />
-          <input
-            type="text"
-            value={localFilePath}
-            onChange={(e) => setLocalFilePath(e.target.value)}
-            placeholder="Local file path (e.g., C:\mocks\users.json)"
-            className="w-full h-8 bg-pb-bg border border-pb-border rounded px-3 text-xs text-pb-text font-mono placeholder-pb-text-dim focus:outline-none focus:border-pb-accent"
-          />
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={localFilePath}
+              onChange={(e) => setLocalFilePath(e.target.value)}
+              placeholder="Local file path (e.g., C:\mocks\users.json)"
+              className="flex-1 h-8 bg-pb-bg border border-pb-border rounded px-3 text-xs text-pb-text font-mono placeholder-pb-text-dim focus:outline-none focus:border-pb-accent"
+            />
+            <button
+              onClick={handleBrowse}
+              className="h-8 px-3 bg-pb-bg border border-pb-border rounded text-xs text-pb-text hover:bg-pb-surface-hover"
+            >
+              Browse…
+            </button>
+          </div>
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
               <label className="text-xs text-pb-text-dim">Status:</label>

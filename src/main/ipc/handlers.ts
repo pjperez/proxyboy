@@ -8,7 +8,7 @@ import { setSystemProxy, clearSystemProxy, isSystemProxyEnabled } from '../utils
 import { ProxyState, Rule, HttpFlow } from '../../shared/types';
 import { flowsToHar } from '../utils/har';
 import { randomUUID } from 'crypto';
-import { saveFlow, clearAllFlows, saveRule, getRules, deleteRule as dbDeleteRule } from '../storage/queries';
+import { saveFlow, clearAllFlows, saveRule, getRules, getFlows as getStoredFlows, deleteRule as dbDeleteRule } from '../storage/queries';
 import * as fs from 'fs';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
@@ -142,6 +142,15 @@ export function registerIpcHandlers(
     }
   } catch (err) {
     console.error('Failed to load rules from database:', err);
+  }
+
+  try {
+    const persistedFlows = getStoredFlows().reverse();
+    for (const flow of persistedFlows) {
+      proxyEngine.addFlow(flow);
+    }
+  } catch (err) {
+    console.error('Failed to load persisted flows from database:', err);
   }
 
   agentClient.setRuleManager({
@@ -330,7 +339,7 @@ export function registerIpcHandlers(
           contextIsolation: true,
           nodeIntegration: false,
           webSecurity: true,
-          sandbox: false,
+          sandbox: true,
         },
       });
 
@@ -388,6 +397,19 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.APP_GET_VERSION, () => {
     try {
       return { version: '1.0.0', name: 'ProxyBoy' };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.APP_PICK_FILE, async () => {
+    try {
+      const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+        title: 'Select File',
+        properties: ['openFile'],
+      });
+      if (canceled || !filePaths.length) return { success: false, canceled: true };
+      return { success: true, path: filePaths[0] };
     } catch (error: any) {
       return { success: false, error: error.message };
     }
@@ -456,10 +478,14 @@ export function registerIpcHandlers(
         try { parsedUrl = new URL(reqUrl); } catch { parsedUrl = new URL('http://unknown'); }
 
         const reqHeaders: Record<string, string> = {};
-        (entry.request?.headers || []).forEach((h: any) => { reqHeaders[h.name.toLowerCase()] = h.value; });
+        (Array.isArray(entry.request?.headers) ? entry.request.headers : []).forEach((h: any) => {
+          if (h?.name && h?.value != null) reqHeaders[String(h.name).toLowerCase()] = String(h.value);
+        });
 
         const resHeaders: Record<string, string> = {};
-        (entry.response?.headers || []).forEach((h: any) => { resHeaders[h.name.toLowerCase()] = h.value; });
+        (Array.isArray(entry.response?.headers) ? entry.response.headers : []).forEach((h: any) => {
+          if (h?.name && h?.value != null) resHeaders[String(h.name).toLowerCase()] = String(h.value);
+        });
 
         const timestamp = new Date(entry.startedDateTime || Date.now()).getTime();
 

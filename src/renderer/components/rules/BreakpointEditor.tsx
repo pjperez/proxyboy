@@ -117,7 +117,7 @@ export default function BreakpointEditor() {
         <div className="flex flex-col items-center justify-center flex-1 text-pb-text-dim">
           <div className="text-4xl mb-4">⏸</div>
           <div className="text-sm">No breakpoint rules</div>
-          <div className="text-xs mt-1">Create a rule to pause and edit traffic on the fly</div>
+          <div className="text-xs mt-1">Create a rule to pause and inspect traffic before forwarding or dropping</div>
         </div>
       ) : (
         <div className="space-y-2">

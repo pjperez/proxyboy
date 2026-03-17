@@ -30,9 +30,22 @@ export class Interceptor {
     }));
   }
 
-  private hasNestedQuantifiers(pattern: string): boolean {
-    // Detect patterns like (a+)+, (.*){2}, (a*)+, etc.
-    return /(\(.*[+*].*\))[+*{\d]/.test(pattern) || /([+*]\))[+*]/.test(pattern);
+  private hasUnsafeRegexPattern(pattern: string): boolean {
+    if (pattern.length > 200) return true;
+
+    const quantifiedGroupWithComplexInner =
+      /\((?:[^()\\]|\\.)*(?:[+*]|\{\d+(?:,\d*)?\}|\|)(?:[^()\\]|\\.)*\)(?:[+*]|\{\d+(?:,\d*)?\})/;
+    const repeatedQuantifiers =
+      /(?:[+*]|\{\d+(?:,\d*)?\})(?:\s*)(?:[+*]|\{\d+(?:,\d*)?\})/;
+    const backReference = /\\[1-9]/;
+    const lookaround = /\(\?<([=!])|\(\?[=!]/;
+
+    return (
+      quantifiedGroupWithComplexInner.test(pattern) ||
+      repeatedQuantifiers.test(pattern) ||
+      backReference.test(pattern) ||
+      lookaround.test(pattern)
+    );
   }
 
   private getCachedRegex(pattern: string, flags?: string): RegExp | null {
@@ -51,8 +64,7 @@ export class Interceptor {
 
   matchesUrl(pattern: string, url: string, isRegex?: boolean): boolean {
     if (isRegex) {
-      if (pattern.length > 500) return false;
-      if (this.hasNestedQuantifiers(pattern)) return false;
+      if (this.hasUnsafeRegexPattern(pattern)) return false;
       const re = this.getCachedRegex(pattern);
       return re ? re.test(url) : false;
     }
@@ -86,7 +98,7 @@ export class Interceptor {
 
   getMapLocalResponse(rule: MapLocalRule): { statusCode: number; headers: Record<string, string>; body: Buffer } | null {
     try {
-      const resolvedPath = path.resolve(rule.localFilePath);
+      const resolvedPath = fs.realpathSync(path.resolve(rule.localFilePath));
       const lowerPath = resolvedPath.toLowerCase();
 
       // Block system directories
@@ -105,7 +117,11 @@ export class Interceptor {
         return null;
       }
 
-      // Block paths outside user home directory
+      // Block paths outside user home directory.
+      // This is intentionally restrictive — users who need files from other
+      // drives can copy/symlink them into their home directory. Relaxing this
+      // would allow the AI agent's createMapLocalRule tool to read arbitrary
+      // system files.
       const userHome = os.homedir();
       if (!lowerPath.startsWith(userHome.toLowerCase())) {
         console.warn('[Interceptor] Map-local path blocked (outside user home):', resolvedPath);

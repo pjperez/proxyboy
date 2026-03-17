@@ -22,6 +22,4 @@ export interface InterceptContext {
   request: HttpRequest;
   response?: HttpResponse;
   shouldIntercept: boolean;
-  modifiedRequest?: Partial<HttpRequest>;
-  modifiedResponse?: Partial<HttpResponse>;
 }
