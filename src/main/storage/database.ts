@@ -124,6 +124,12 @@ function initializeSchema(database: SqlJsDatabase): void {
     );
   `);
   database.run(`
+    CREATE TABLE IF NOT EXISTS app_settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `);
+  database.run(`
     CREATE TABLE IF NOT EXISTS agent_conversations (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,

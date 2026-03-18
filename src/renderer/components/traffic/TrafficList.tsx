@@ -4,6 +4,7 @@ import TrafficRow from './TrafficRow';
 import ContextMenu from './ContextMenu';
 import type { ContextMenuItem } from './ContextMenu';
 import { flowToCurl } from '../../utils/curl';
+import { useRulesStore } from '../../stores/rules';
 import type { HttpFlow, HttpHeaders } from '../../../shared/types';
 
 export type ColumnKey = 'timestamp' | 'method' | 'status' | 'url' | 'host' | 'type' | 'size' | 'time';
@@ -43,6 +44,27 @@ function formatHeaders(headers: HttpHeaders): string {
   return Object.entries(headers)
     .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
     .join('\n');
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function getQuickAddRulePattern(flow: HttpFlow): { hostLabel: string; urlPattern: string } | null {
+  try {
+    const parsedUrl = new URL(flow.request.url);
+    const hostLabel = parsedUrl.hostname || flow.request.host;
+    if (!hostLabel) {
+      return null;
+    }
+
+    return {
+      hostLabel,
+      urlPattern: `^https?:\\/\\/${escapeRegex(hostLabel)}(?::\\d+)?\\/.*$`,
+    };
+  } catch {
+    return null;
+  }
 }
 
 function getSortValue(flow: HttpFlow, column: ColumnKey): string | number {
@@ -163,8 +185,69 @@ export default function TrafficList({ flows, selectedId, onSelect }: Props) {
     setContextMenu({ x: e.clientX, y: e.clientY, flow });
   }, []);
 
+  const quickAddCaptureRule = useCallback(async (flow: HttpFlow, type: 'allow-list' | 'block-list') => {
+    const api = (window as any).proxyboy;
+    if (!api?.rules) {
+      window.alert('Capture rule controls are unavailable.');
+      return;
+    }
+
+    const derivedPattern = getQuickAddRulePattern(flow);
+    if (!derivedPattern) {
+      window.alert('Could not derive a host pattern from this request.');
+      return;
+    }
+
+    await useRulesStore.getState().loadRules();
+    const existingRule = useRulesStore.getState().rules.find((rule) =>
+      rule.type === type &&
+      rule.matchCriteria.urlPattern === derivedPattern.urlPattern &&
+      rule.matchCriteria.isRegex
+    );
+
+    if (!existingRule) {
+      await api.rules.create({
+        type,
+        name: `${type === 'allow-list' ? 'Allow' : 'Block'} ${derivedPattern.hostLabel}`,
+        enabled: true,
+        matchCriteria: {
+          urlPattern: derivedPattern.urlPattern,
+          isRegex: true,
+        },
+      });
+    }
+
+    const mode = type === 'allow-list' ? 'allow-list' : 'block-list';
+    const modeResult = await api.rules.setCaptureMode(mode);
+    if (!modeResult?.success) {
+      window.alert(modeResult?.error || 'Failed to switch the capture mode.');
+      return;
+    }
+
+    await Promise.all([
+      useRulesStore.getState().loadRules(),
+      useRulesStore.getState().loadCaptureMode(),
+    ]);
+
+    window.alert(
+      existingRule
+        ? `Switched capture mode to ${mode === 'allow-list' ? 'Allow List' : 'Block List'} for ${derivedPattern.hostLabel}.`
+        : `Added a ${mode === 'allow-list' ? 'Allow List' : 'Block List'} rule for ${derivedPattern.hostLabel} and switched capture mode.`,
+    );
+  }, []);
+
   const buildMenuItems = useCallback((flow: HttpFlow): ContextMenuItem[] => {
     return [
+      {
+        label: 'Block this domain',
+        icon: '🛑',
+        onClick: () => quickAddCaptureRule(flow, 'block-list'),
+      },
+      {
+        label: 'Allow only this domain',
+        icon: '✅',
+        onClick: () => quickAddCaptureRule(flow, 'allow-list'),
+      },
       {
         label: 'Copy as cURL',
         icon: '⌘',
@@ -199,7 +282,7 @@ export default function TrafficList({ flows, selectedId, onSelect }: Props) {
         },
       },
     ];
-  }, []);
+  }, [quickAddCaptureRule]);
 
   if (flows.length === 0) {
     return (

@@ -5,10 +5,10 @@ import { ProxyEngine } from '../proxy/engine';
 import { CertificateManager } from '../proxy/certificate';
 import { AgentClient } from '../agent/client';
 import { setSystemProxy, clearSystemProxy, isSystemProxyEnabled } from '../utils/windows-proxy';
-import { ProxyState, Rule, HttpFlow } from '../../shared/types';
+import { ProxyState, Rule, HttpFlow, CaptureFilterMode } from '../../shared/types';
 import { flowsToHar } from '../utils/har';
 import { randomUUID } from 'crypto';
-import { saveFlow, clearAllFlows, saveRule, getRules, getFlows as getStoredFlows, deleteRule as dbDeleteRule } from '../storage/queries';
+import { saveFlow, clearAllFlows, saveRule, getRules, getFlows as getStoredFlows, deleteRule as dbDeleteRule, getAppSetting, setAppSetting } from '../storage/queries';
 import * as fs from 'fs';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
@@ -145,6 +145,15 @@ export function registerIpcHandlers(
   }
 
   try {
+    const savedCaptureMode = getAppSetting('capture_mode');
+    if (savedCaptureMode === 'capture-all' || savedCaptureMode === 'allow-list' || savedCaptureMode === 'block-list') {
+      proxyEngine.getInterceptor().setCaptureMode(savedCaptureMode);
+    }
+  } catch (err) {
+    console.error('Failed to load capture mode from database:', err);
+  }
+
+  try {
     const persistedFlows = getStoredFlows().reverse();
     for (const flow of persistedFlows) {
       proxyEngine.addFlow(flow);
@@ -224,6 +233,28 @@ export function registerIpcHandlers(
       return null;
     } catch (error: any) {
       return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.RULES_GET_CAPTURE_MODE, () => {
+    try {
+      return { success: true, mode: proxyEngine.getInterceptor().getCaptureMode() };
+    } catch (error: any) {
+      return { success: false, mode: 'capture-all', error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.RULES_SET_CAPTURE_MODE, (_event, mode: CaptureFilterMode) => {
+    try {
+      if (!['capture-all', 'allow-list', 'block-list'].includes(mode)) {
+        return { success: false, mode: proxyEngine.getInterceptor().getCaptureMode(), error: 'Invalid capture mode.' };
+      }
+
+      proxyEngine.getInterceptor().setCaptureMode(mode);
+      setAppSetting('capture_mode', mode);
+      return { success: true, mode };
+    } catch (error: any) {
+      return { success: false, mode: proxyEngine.getInterceptor().getCaptureMode(), error: error.message };
     }
   });
 

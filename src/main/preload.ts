@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../shared/constants';
-import type { ProxyState, HttpFlow, Rule, FilterCriteria } from '../shared/types';
+import type { ProxyState, HttpFlow, Rule, FilterCriteria, CaptureFilterMode } from '../shared/types';
 
 const api = {
   // Proxy control
@@ -40,6 +40,10 @@ const api = {
     update: (rule: Rule) => ipcRenderer.invoke(IPC_CHANNELS.RULES_UPDATE, rule),
     delete: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.RULES_DELETE, id),
     toggle: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.RULES_TOGGLE, id),
+    getCaptureMode: (): Promise<{ success: boolean; mode: CaptureFilterMode }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.RULES_GET_CAPTURE_MODE),
+    setCaptureMode: (mode: CaptureFilterMode): Promise<{ success: boolean; mode: CaptureFilterMode; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.RULES_SET_CAPTURE_MODE, mode),
     onRuleCreated: (callback: (rule: Rule) => void) => {
       const handler = (_event: any, rule: Rule) => callback(rule);
       ipcRenderer.on(IPC_CHANNELS.RULES_CREATED, handler);
