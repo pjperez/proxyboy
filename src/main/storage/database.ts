@@ -91,6 +91,8 @@ function initializeSchema(database: SqlJsDatabase): void {
       body TEXT,
       body_encoding TEXT DEFAULT 'utf8',
       body_size INTEGER DEFAULT 0,
+      graphql_operation_type TEXT,
+      graphql_operation_name TEXT,
       timestamp INTEGER NOT NULL,
       FOREIGN KEY (flow_id) REFERENCES flows(id) ON DELETE CASCADE
     );
@@ -150,6 +152,8 @@ function initializeSchema(database: SqlJsDatabase): void {
   database.run('CREATE INDEX IF NOT EXISTS idx_agent_messages_conversation ON agent_messages(conversation_id);');
   ensureColumn(database, 'flows', 'timing', 'TEXT');
   ensureColumn(database, 'requests', 'body_encoding', "TEXT DEFAULT 'utf8'");
+  ensureColumn(database, 'requests', 'graphql_operation_type', 'TEXT');
+  ensureColumn(database, 'requests', 'graphql_operation_name', 'TEXT');
   ensureColumn(database, 'responses', 'body_encoding', "TEXT DEFAULT 'utf8'");
 }
 
