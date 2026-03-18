@@ -1,5 +1,6 @@
 import { getDatabase, schedulePersist } from './database';
 import { FlowTiming, HttpFlow, HttpRequest, HttpResponse, Rule, StoredBody } from '../../shared/types';
+import { annotateGraphQLRequest } from '../../shared/graphql';
 
 function isProbablyTextBuffer(buf: Buffer): boolean {
   const sample = buf.subarray(0, Math.min(512, buf.length));
@@ -207,12 +208,15 @@ function rowToFlow(row: any): HttpFlow {
     };
   }
 
+  const tags = JSON.parse(row.tags || '[]');
+  annotateGraphQLRequest(request, tags);
+
   return {
     id: row.id,
     request,
     response,
     state: row.state,
-    tags: JSON.parse(row.tags || '[]'),
+    tags,
     notes: row.notes || undefined,
     createdAt: row.created_at,
     timing: row.timing ? JSON.parse(row.timing as string) as FlowTiming : undefined,

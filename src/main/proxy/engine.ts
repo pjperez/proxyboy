@@ -8,6 +8,7 @@ import { CertificateManager } from './certificate';
 import { Interceptor } from './interceptor';
 import { DnsResolverService } from './dns-resolver';
 import { ProxyEngineOptions } from './types';
+import { annotateGraphQLRequest } from '../../shared/graphql';
 
 const MAX_FLOWS = 10000;
 const MAX_BODY_SIZE = 2 * 1024 * 1024; // 2 MB
@@ -258,6 +259,7 @@ export class ProxyEngine extends EventEmitter {
           flow.request.body = body;
           flow.request.bodySize = body.length;
         }
+        annotateGraphQLRequest(flow.request, flow.tags);
         if (flow.timing) flow.timing.requestEnd = Date.now();
         callback();
       });

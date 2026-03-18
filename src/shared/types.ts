@@ -3,6 +3,8 @@ export interface HttpHeaders {
   [key: string]: string | string[];
 }
 
+export type GraphQLOperationType = 'query' | 'mutation' | 'subscription';
+
 export interface HttpRequest {
   id: string;
   method: string;
@@ -14,6 +16,8 @@ export interface HttpRequest {
   body?: Buffer | string;
   bodySize: number;
   timestamp: number;
+  graphqlOperationType?: GraphQLOperationType;
+  graphqlOperationName?: string;
 }
 
 export interface HttpResponse {
@@ -77,6 +81,7 @@ export interface ProxyState {
 // Filter types
 export interface FilterCriteria {
   text?: string;
+  graphqlOperationName?: string;
   methods?: string[];
   statusCodes?: StatusCodeRange[];
   contentTypes?: string[];

@@ -54,6 +54,12 @@ export const useTrafficStore = create<TrafficState>((set, get) => ({
           return false;
         }
       }
+      if (filter.graphqlOperationName) {
+        const graphqlOperationName = flow.request.graphqlOperationName?.toLowerCase() || '';
+        if (!graphqlOperationName.includes(filter.graphqlOperationName.toLowerCase())) {
+          return false;
+        }
+      }
       if (filter.methods?.length && !filter.methods.includes(flow.request.method)) {
         return false;
       }

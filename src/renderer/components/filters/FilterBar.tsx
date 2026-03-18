@@ -24,12 +24,18 @@ const CONTENT_TYPE_PRESETS = [
 export default function FilterBar() {
   const { filter, setFilter } = useTrafficStore();
   const [searchText, setSearchText] = useState('');
+  const [graphqlText, setGraphqlText] = useState('');
   const [minDurationText, setMinDurationText] = useState('');
   const [maxDurationText, setMaxDurationText] = useState('');
 
   const handleSearch = (text: string) => {
     setSearchText(text);
     setFilter({ ...filter, text: text || undefined });
+  };
+
+  const handleGraphqlSearch = (text: string) => {
+    setGraphqlText(text);
+    setFilter({ ...filter, graphqlOperationName: text || undefined });
   };
 
   const toggleMethod = (method: string) => {
@@ -73,6 +79,7 @@ export default function FilterBar() {
 
   const clearFilters = () => {
     setSearchText('');
+    setGraphqlText('');
     setMinDurationText('');
     setMaxDurationText('');
     setFilter({});
@@ -80,6 +87,7 @@ export default function FilterBar() {
 
   const hasFilters =
     searchText ||
+    graphqlText ||
     minDurationText ||
     maxDurationText ||
     filter.methods?.length ||
@@ -102,6 +110,23 @@ export default function FilterBar() {
         {searchText && (
           <button
             onClick={() => handleSearch('')}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-pb-text-dim hover:text-pb-text text-xs"
+          >
+            ✕
+          </button>
+        )}
+      </div>
+      <div className="relative shrink-0 w-40">
+        <input
+          type="text"
+          value={graphqlText}
+          onChange={(e) => handleGraphqlSearch(e.target.value)}
+          placeholder="GraphQL op"
+          className="w-full h-7 bg-pb-bg border border-pb-border rounded px-3 pr-8 text-xs text-pb-text placeholder-pb-text-dim focus:outline-none focus:border-pb-accent"
+        />
+        {graphqlText && (
+          <button
+            onClick={() => handleGraphqlSearch('')}
             className="absolute right-2 top-1/2 -translate-y-1/2 text-pb-text-dim hover:text-pb-text text-xs"
           >
             ✕

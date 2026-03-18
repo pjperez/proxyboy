@@ -9,6 +9,7 @@ import { ProxyState, Rule, HttpFlow } from '../../shared/types';
 import { flowsToHar } from '../utils/har';
 import { randomUUID } from 'crypto';
 import { saveFlow, clearAllFlows, saveRule, getRules, getFlows as getStoredFlows, deleteRule as dbDeleteRule } from '../storage/queries';
+import { annotateGraphQLRequest } from '../../shared/graphql';
 import * as fs from 'fs';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
@@ -471,7 +472,7 @@ export function registerIpcHandlers(
 
       const entries: any[] = har.log.entries;
 
-      const importedFlows: any[] = entries.map((entry: any, i: number) => {
+      const importedFlows: HttpFlow[] = entries.map((entry: any, i: number) => {
         const id = `har-import-${Date.now()}-${i}`;
         const reqUrl = entry.request?.url || '';
         let parsedUrl: URL;
@@ -489,7 +490,7 @@ export function registerIpcHandlers(
 
         const timestamp = new Date(entry.startedDateTime || Date.now()).getTime();
 
-        return {
+        const flow: HttpFlow = {
           id,
           request: {
             id: `${id}-req`,
@@ -518,6 +519,8 @@ export function registerIpcHandlers(
           tags: ['har-import'],
           createdAt: timestamp,
         };
+        annotateGraphQLRequest(flow.request, flow.tags);
+        return flow;
       });
 
       for (const flow of importedFlows) {
