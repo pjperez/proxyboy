@@ -16,6 +16,7 @@ ProxyBoy is a man-in-the-middle (MITM) HTTP/HTTPS proxy that captures, inspects,
 
 - **Traffic Capture** — Intercept HTTP and HTTPS traffic with automatic SSL certificate generation
 - **Request/Response Inspector** — View headers, bodies (JSON, HTML, XML, images), timing, and metadata
+- **No Cache Toggle** — Strip cache validators and return `Cache-Control: no-store` to force fresh responses
 - **AI Assistant** — Chat panel powered by GitHub Copilot that can search traffic, analyze patterns, create rules, and export data
 - **Breakpoint Rules** — Pause requests/responses mid-flight, inspect them, then forward or drop
 - **Map Local Rules** — Serve local files instead of remote responses for mocking APIs
