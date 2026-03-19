@@ -4,9 +4,9 @@ import { IPC_CHANNELS } from '../../shared/constants';
 import { ProxyEngine } from '../proxy/engine';
 import { CertificateManager } from '../proxy/certificate';
 import { AgentClient } from '../agent/client';
-import { replayFlowThroughProxy } from '../proxy/replay';
+import { replayFlowThroughProxy, sendComposedRequestThroughProxy } from '../proxy/replay';
 import { setSystemProxy, clearSystemProxy, isSystemProxyEnabled } from '../utils/windows-proxy';
-import { ProxyState, Rule, HttpFlow, CaptureFilterMode } from '../../shared/types';
+import { ProxyState, Rule, HttpFlow, CaptureFilterMode, ComposerRequest } from '../../shared/types';
 import { normalizeThrottleSettings, type ThrottleSettings } from '../../shared/throttle';
 import { flowsToHar } from '../utils/har';
 import { randomUUID } from 'crypto';
@@ -204,6 +204,20 @@ export function registerIpcHandlers(
 
       await replayFlowThroughProxy(flow, proxyEngine.getPort());
       return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TRAFFIC_COMPOSE, async (_event, request: ComposerRequest) => {
+    try {
+      if (!proxyEngine.isRunning()) {
+        return { success: false, error: 'Start the proxy before sending a composed request.' };
+      }
+
+      const composerRequestId = randomUUID();
+      await sendComposedRequestThroughProxy(request, proxyEngine.getPort(), composerRequestId);
+      return { success: true, composerRequestId };
     } catch (error: any) {
       return { success: false, error: error.message };
     }

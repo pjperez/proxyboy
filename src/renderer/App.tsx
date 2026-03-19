@@ -7,6 +7,7 @@ import TrafficList from './components/traffic/TrafficList';
 import TrafficDetail from './components/traffic/TrafficDetail';
 import FilterBar from './components/filters/FilterBar';
 import AgentPanel from './components/agent/AgentPanel';
+import ComposerPanel from './components/composer/ComposerPanel';
 import BreakpointEditor from './components/rules/BreakpointEditor';
 import MapLocalEditor from './components/rules/MapLocalEditor';
 import CaptureFilterEditor from './components/rules/CaptureFilterEditor';
@@ -20,6 +21,7 @@ import { clearTrafficFlows, deleteTrafficFlow, exportHarFile, importHarFile, tog
 import { getNextSelectedFlowIdAfterDelete } from './utils/shortcuts';
 import { applyThemePreference, watchSystemTheme } from './utils/theme';
 import { normalizeThrottleSettings } from '../shared/throttle';
+import type { ComposerRequest, HttpFlow } from '../shared/types';
 
 declare global {
   interface Window {
@@ -27,7 +29,24 @@ declare global {
   }
 }
 
-type View = 'traffic' | 'breakpoints' | 'map-local' | 'capture-rules' | 'settings';
+type View = 'traffic' | 'composer' | 'breakpoints' | 'map-local' | 'capture-rules' | 'settings';
+
+function buildComposerDraftFromFlow(flow: HttpFlow): ComposerRequest {
+  const body = (flow.request as any)._isBase64
+    ? ''
+    : typeof flow.request.body === 'string'
+      ? flow.request.body
+      : flow.request.body
+        ? String(flow.request.body)
+        : undefined;
+
+  return {
+    method: flow.request.method,
+    url: flow.request.url,
+    headers: flow.request.headers,
+    body,
+  };
+}
 
 // Detect if this is the detached agent window
 const isAgentWindow = new URLSearchParams(window.location.search).get('view') === 'agent';
@@ -45,6 +64,7 @@ export default function App() {
 
 function MainApp() {
   const [selectedView, setSelectedView] = useState<View>('traffic');
+  const [composerDraft, setComposerDraft] = useState<ComposerRequest | null>(null);
   const [showAgent, setShowAgent] = useState(false);
   const [agentDetached, setAgentDetached] = useState(false);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
@@ -308,6 +328,11 @@ function MainApp() {
     setCompareTargetFlowId(flow.id);
   }, [markedFlowId, setCompareTargetFlowId, showActionError]);
 
+  const handleEditAndResend = useCallback((flow: HttpFlow) => {
+    setComposerDraft(buildComposerDraftFromFlow(flow));
+    setSelectedView('composer');
+  }, []);
+
   const dismissPanels = useCallback((): boolean => {
     if (showShortcutHelp) {
       setShowShortcutHelp(false);
@@ -500,6 +525,7 @@ function MainApp() {
                     flows={filteredFlows}
                     selectedId={selectedFlowId}
                     onSelect={setSelectedFlowId}
+                    onEditAndResend={handleEditAndResend}
                     markedFlowId={markedFlowId}
                     compareTargetFlowId={compareTargetFlowId}
                     onMarkForCompare={handleMarkFlowForCompare}
@@ -520,6 +546,7 @@ function MainApp() {
               </div>
             </>
           )}
+          {selectedView === 'composer' && <ComposerPanel draft={composerDraft} />}
           {selectedView === 'breakpoints' && <BreakpointEditor />}
           {selectedView === 'map-local' && <MapLocalEditor />}
           {selectedView === 'capture-rules' && <CaptureFilterEditor />}

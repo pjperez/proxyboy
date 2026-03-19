@@ -1,8 +1,8 @@
 import * as http from 'http';
 import * as tls from 'tls';
 import { URL } from 'url';
-import type { HttpFlow, HttpHeaders } from '../../shared/types';
-import { INTERNAL_REPLAY_HEADER } from '../../shared/constants';
+import type { ComposerRequest, HttpFlow, HttpHeaders } from '../../shared/types';
+import { INTERNAL_COMPOSER_HEADER, INTERNAL_REPLAY_HEADER } from '../../shared/constants';
 
 const REPLAY_TIMEOUT_MS = 30000;
 const HOP_BY_HOP_HEADERS = new Set([
@@ -41,6 +41,30 @@ export function buildReplayHeaders(
   hasBody: boolean,
   bodyLength: number,
 ): Record<string, string> {
+  return buildProxyHeaders(headers, target, hasBody, bodyLength, {
+    [INTERNAL_REPLAY_HEADER]: '1',
+  });
+}
+
+export function buildComposerHeaders(
+  headers: HttpHeaders,
+  target: URL,
+  hasBody: boolean,
+  bodyLength: number,
+  composerRequestId: string,
+): Record<string, string> {
+  return buildProxyHeaders(headers, target, hasBody, bodyLength, {
+    [INTERNAL_COMPOSER_HEADER]: composerRequestId,
+  });
+}
+
+function buildProxyHeaders(
+  headers: HttpHeaders,
+  target: URL,
+  hasBody: boolean,
+  bodyLength: number,
+  internalHeaders: Record<string, string>,
+): Record<string, string> {
   const replayHeaders: Record<string, string> = {};
 
   for (const [name, value] of Object.entries(headers)) {
@@ -54,7 +78,9 @@ export function buildReplayHeaders(
 
   replayHeaders.Host = target.host;
   replayHeaders.Connection = 'close';
-  replayHeaders[INTERNAL_REPLAY_HEADER] = '1';
+  for (const [name, value] of Object.entries(internalHeaders)) {
+    replayHeaders[name] = value;
+  }
 
   if (hasBody) {
     replayHeaders['Content-Length'] = String(bodyLength);
@@ -84,8 +110,8 @@ export function buildRawHttpRequest(
   return Buffer.concat([head, body]);
 }
 
-function replayHttp(
-  flow: HttpFlow,
+function sendHttpRequestViaProxy(
+  method: string,
   proxyPort: number,
   target: URL,
   headers: Record<string, string>,
@@ -113,7 +139,7 @@ function replayHttp(
       {
         host: '127.0.0.1',
         port: proxyPort,
-        method: flow.request.method,
+        method,
         path: target.toString(),
         headers,
       },
@@ -133,8 +159,8 @@ function replayHttp(
   });
 }
 
-function replayHttps(
-  flow: HttpFlow,
+function sendHttpsRequestViaProxy(
+  method: string,
   proxyPort: number,
   target: URL,
   headers: Record<string, string>,
@@ -210,7 +236,7 @@ function replayHttps(
           servername: target.hostname,
         },
         () => {
-          tlsSocket?.end(buildRawHttpRequest(flow.request.method, target, headers, body));
+          tlsSocket?.end(buildRawHttpRequest(method, target, headers, body));
         },
       );
 
@@ -230,14 +256,37 @@ export async function replayFlowThroughProxy(flow: HttpFlow, proxyPort: number):
   const headers = buildReplayHeaders(flow.request.headers, target, hasBody, body?.length ?? 0);
 
   if (target.protocol === 'https:') {
-    await replayHttps(flow, proxyPort, target, headers, body);
+    await sendHttpsRequestViaProxy(flow.request.method, proxyPort, target, headers, body);
     return;
   }
 
   if (target.protocol === 'http:') {
-    await replayHttp(flow, proxyPort, target, headers, body);
+    await sendHttpRequestViaProxy(flow.request.method, proxyPort, target, headers, body);
     return;
   }
 
   throw new Error(`Unsupported replay protocol: ${target.protocol}`);
+}
+
+export async function sendComposedRequestThroughProxy(
+  request: ComposerRequest,
+  proxyPort: number,
+  composerRequestId: string,
+): Promise<void> {
+  const target = new URL(request.url);
+  const hasBody = typeof request.body === 'string' && request.body.length > 0;
+  const body = hasBody ? Buffer.from(request.body as string, 'utf8') : undefined;
+  const headers = buildComposerHeaders(request.headers, target, hasBody, body?.length ?? 0, composerRequestId);
+
+  if (target.protocol === 'https:') {
+    await sendHttpsRequestViaProxy(request.method, proxyPort, target, headers, body);
+    return;
+  }
+
+  if (target.protocol === 'http:') {
+    await sendHttpRequestViaProxy(request.method, proxyPort, target, headers, body);
+    return;
+  }
+
+  throw new Error(`Unsupported composer protocol: ${target.protocol}`);
 }

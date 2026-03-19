@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildRawHttpRequest, buildReplayHeaders } from './replay';
+import { buildComposerHeaders, buildRawHttpRequest, buildReplayHeaders } from './replay';
 
 describe('replay helpers', () => {
   it('drops hop-by-hop headers and injects replay metadata', () => {
@@ -38,5 +38,25 @@ describe('replay helpers', () => {
     expect(payload).toContain('POST /users?page=2 HTTP/1.1\r\n');
     expect(payload).toContain('Host: api.example.com\r\n');
     expect(payload).toContain('\r\n\r\nhello');
+  });
+
+  it('marks composed requests with a private composer header', () => {
+    const headers = buildComposerHeaders(
+      {
+        host: 'example.com',
+        accept: 'application/json',
+      },
+      new URL('https://api.example.com/users'),
+      false,
+      0,
+      'composer-123',
+    );
+
+    expect(headers).toEqual({
+      accept: 'application/json',
+      Host: 'api.example.com',
+      Connection: 'close',
+      'x-proxyboy-composer-id': 'composer-123',
+    });
   });
 });

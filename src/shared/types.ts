@@ -41,6 +41,7 @@ export interface HttpFlow {
   state: FlowState;
   tags: string[];
   notes?: string;
+  composerRequestId?: string;
   createdAt: number;
   timing?: FlowTiming;
 }
@@ -195,4 +196,11 @@ export interface BreakpointPauseMessage {
 export interface BreakpointResumeMessage {
   flowId: string;
   action: 'forward' | 'drop';
+}
+
+export interface ComposerRequest {
+  method: string;
+  url: string;
+  headers: HttpHeaders;
+  body?: string;
 }

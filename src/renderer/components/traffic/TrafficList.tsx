@@ -26,6 +26,7 @@ interface Props {
   flows: HttpFlow[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onEditAndResend: (flow: HttpFlow) => void;
   markedFlowId: string | null;
   compareTargetFlowId: string | null;
   onMarkForCompare: (flow: HttpFlow) => void;
@@ -144,6 +145,7 @@ export default function TrafficList({
   flows,
   selectedId,
   onSelect,
+  onEditAndResend,
   markedFlowId,
   compareTargetFlowId,
   onMarkForCompare,
@@ -297,6 +299,11 @@ export default function TrafficList({
         onClick: () => quickAddCaptureRule(flow, 'allow-list'),
       },
       {
+        label: 'Edit and Resend',
+        icon: '✍️',
+        onClick: () => onEditAndResend(flow),
+      },
+      {
         label: 'Repeat Request',
         icon: '↻',
         onClick: async () => {
@@ -340,7 +347,7 @@ export default function TrafficList({
         },
       },
     ];
-  }, [compareTargetFlowId, markedFlowId, onClearComparison, onCompareWithMarked, onMarkForCompare, quickAddCaptureRule]);
+  }, [compareTargetFlowId, markedFlowId, onClearComparison, onCompareWithMarked, onEditAndResend, onMarkForCompare, quickAddCaptureRule]);
 
   if (flows.length === 0) {
     return (
