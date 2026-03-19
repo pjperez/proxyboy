@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../shared/constants';
 import type { ProxyState, HttpFlow, Rule, FilterCriteria, CaptureFilterMode } from '../shared/types';
 import type { ThrottleSettings } from '../shared/throttle';
+import type { ProtobufDecodeRequest, ProtobufSettings } from '../shared/protobuf';
 
 const api = {
   // Proxy control
@@ -111,6 +112,13 @@ const api = {
     exportHar: (flowIds?: string[]) => ipcRenderer.invoke(IPC_CHANNELS.APP_EXPORT_HAR, flowIds),
     importHar: () => ipcRenderer.invoke(IPC_CHANNELS.APP_IMPORT_HAR),
     pickFile: () => ipcRenderer.invoke(IPC_CHANNELS.APP_PICK_FILE),
+  },
+
+  protobuf: {
+    getConfig: (): Promise<ProtobufSettings> => ipcRenderer.invoke(IPC_CHANNELS.PROTOBUF_GET_CONFIG),
+    setConfig: (settings: ProtobufSettings) => ipcRenderer.invoke(IPC_CHANNELS.PROTOBUF_SET_CONFIG, settings),
+    pickProtoFiles: () => ipcRenderer.invoke(IPC_CHANNELS.PROTOBUF_PICK_PROTO_FILES),
+    decodeBody: (request: ProtobufDecodeRequest) => ipcRenderer.invoke(IPC_CHANNELS.PROTOBUF_DECODE_BODY, request),
   },
 
   // Debug

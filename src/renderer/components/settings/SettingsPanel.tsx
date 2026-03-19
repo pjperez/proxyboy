@@ -9,6 +9,7 @@ import {
   resolveThrottleProfile,
   type ThrottleProfileId,
 } from '../../../shared/throttle';
+import { normalizeProtobufSettings } from '../../../shared/protobuf';
 
 export default function SettingsPanel() {
   const {
@@ -33,6 +34,9 @@ export default function SettingsPanel() {
   const [dnsError, setDnsError] = useState<string | null>(null);
   const [throttleDraft, setThrottleDraft] = useState(() => throttleSettings.customProfile);
   const [throttleError, setThrottleError] = useState<string | null>(null);
+  const [protobufPathsDraft, setProtobufPathsDraft] = useState('');
+  const [protobufApplied, setProtobufApplied] = useState(false);
+  const [protobufError, setProtobufError] = useState<string | null>(null);
 
   useEffect(() => {
     window.proxyboy?.proxy.getCertStatus().then((status: { installed: boolean }) => {
@@ -45,6 +49,10 @@ export default function SettingsPanel() {
         setDnsMode('custom');
         setDnsServers(config.servers.join(', '));
       }
+    }).catch(() => {});
+
+    window.proxyboy?.protobuf.getConfig().then((config: { protoFilePaths: string[] }) => {
+      setProtobufPathsDraft(config.protoFilePaths.join('\n'));
     }).catch(() => {});
   }, []);
 
@@ -129,6 +137,36 @@ export default function SettingsPanel() {
 
   const handleClearDnsCache = () => {
     window.proxyboy?.dns.clearCache();
+  };
+
+  const handleBrowseProtoFiles = async () => {
+    const result = await window.proxyboy?.protobuf.pickProtoFiles();
+    if (result?.success) {
+      setProtobufPathsDraft(result.filePaths.join('\n'));
+      setProtobufApplied(false);
+      setProtobufError(null);
+    }
+  };
+
+  const handleApplyProtoFiles = async () => {
+    const nextSettings = normalizeProtobufSettings({
+      protoFilePaths: protobufPathsDraft
+        .split(/\r?\n|,/)
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0),
+    });
+
+    const result = await window.proxyboy?.protobuf.setConfig(nextSettings);
+    if (result?.success) {
+      setProtobufPathsDraft(result.settings.protoFilePaths.join('\n'));
+      setProtobufApplied(true);
+      setProtobufError(null);
+      setTimeout(() => setProtobufApplied(false), 2000);
+      return;
+    }
+
+    setProtobufApplied(false);
+    setProtobufError(result?.error || 'Failed to update the configured .proto files.');
   };
 
   const resolvedTheme = resolveThemePreference(theme);
@@ -315,6 +353,44 @@ export default function SettingsPanel() {
           >
             Clear cache
           </button>
+        </Row>
+      </Section>
+
+      <Section title="Protocol Decoders">
+        <Row label=".proto files">
+          <div className="flex flex-col items-end gap-2">
+            <textarea
+              value={protobufPathsDraft}
+              onChange={(event) => {
+                setProtobufPathsDraft(event.target.value);
+                setProtobufApplied(false);
+                setProtobufError(null);
+              }}
+              rows={4}
+              placeholder="C:\path\to\service.proto"
+              className="bg-pb-bg border border-pb-border rounded px-3 py-2 text-sm text-pb-text font-mono w-80
+                focus:outline-none focus:border-pb-accent resize-y"
+            />
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleBrowseProtoFiles}
+                className="px-3 py-1.5 rounded text-sm text-pb-text border border-pb-border hover:bg-pb-surface-hover"
+              >
+                Browse
+              </button>
+              <button
+                onClick={handleApplyProtoFiles}
+                className="px-3 py-1.5 rounded text-sm font-medium bg-pb-accent text-pb-bg hover:bg-pb-accent/80"
+              >
+                Apply
+              </button>
+              {protobufApplied && <span className="text-xs text-pb-success">✓</span>}
+            </div>
+            <span className="max-w-md text-right text-xs text-pb-text-dim">
+              Used to decode gRPC and protobuf bodies in the traffic detail view. Without a matching schema, ProxyBoy falls back to raw field numbers.
+            </span>
+            {protobufError && <span className="text-xs text-pb-error">{protobufError}</span>}
+          </div>
         </Row>
       </Section>
 
