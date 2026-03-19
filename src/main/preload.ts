@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../shared/constants';
 import type { ProxyState, HttpFlow, Rule, FilterCriteria, CaptureFilterMode } from '../shared/types';
 import type { ThrottleSettings } from '../shared/throttle';
+import type { UpstreamProxySettings } from '../shared/upstream-proxy';
 
 const api = {
   // Proxy control
@@ -12,6 +13,7 @@ const api = {
     setSystemProxy: (enabled: boolean) => ipcRenderer.invoke(IPC_CHANNELS.PROXY_SET_SYSTEM, enabled),
     setNoCache: (enabled: boolean) => ipcRenderer.invoke(IPC_CHANNELS.PROXY_SET_NO_CACHE, enabled),
     setThrottle: (settings: ThrottleSettings) => ipcRenderer.invoke(IPC_CHANNELS.PROXY_SET_THROTTLE, settings),
+    setUpstreamProxy: (settings: UpstreamProxySettings) => ipcRenderer.invoke(IPC_CHANNELS.PROXY_SET_UPSTREAM, settings),
     installCert: () => ipcRenderer.invoke(IPC_CHANNELS.PROXY_INSTALL_CERT),
     getCertStatus: () => ipcRenderer.invoke(IPC_CHANNELS.PROXY_CERT_STATUS),
   },

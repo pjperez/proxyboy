@@ -1,6 +1,8 @@
 import { EventEmitter } from 'events';
 import { Proxy } from 'http-mitm-proxy';
 import type { IProxy } from 'http-mitm-proxy';
+import * as http from 'http';
+import * as https from 'https';
 import { randomUUID } from 'crypto';
 import { gunzipSync, inflateSync, brotliDecompressSync } from 'zlib';
 import { HttpFlow, HttpRequest, HttpResponse } from '../../shared/types';
@@ -19,6 +21,17 @@ import {
   resolveThrottleProfile,
   type ThrottleSettings,
 } from '../../shared/throttle';
+import {
+  DEFAULT_UPSTREAM_PROXY_SETTINGS,
+  normalizeUpstreamProxySettings,
+  shouldBypassUpstreamProxy,
+  type UpstreamProxySettings,
+} from '../../shared/upstream-proxy';
+import {
+  createDirectAgents,
+  createUpstreamProxyAgents,
+  type UpstreamProxyAgents,
+} from './upstream-proxy';
 
 const MAX_FLOWS = 10000;
 const MAX_BODY_SIZE = 2 * 1024 * 1024; // 2 MB
@@ -61,6 +74,9 @@ export class ProxyEngine extends EventEmitter {
   private origStderrWrite: typeof process.stderr.write | null = null;
   private noCacheEnabled = false;
   private throttleSettings: ThrottleSettings = DEFAULT_THROTTLE_SETTINGS;
+  private upstreamProxySettings: UpstreamProxySettings;
+  private directAgents: UpstreamProxyAgents;
+  private upstreamAgents: UpstreamProxyAgents | null;
 
   constructor(options: ProxyEngineOptions, certManager: CertificateManager) {
     super();
@@ -69,6 +85,9 @@ export class ProxyEngine extends EventEmitter {
     this.interceptor = new Interceptor();
     this.dnsResolver = new DnsResolverService();
     this.proxy = new Proxy();
+    this.upstreamProxySettings = normalizeUpstreamProxySettings(options.upstreamProxySettings);
+    this.directAgents = createDirectAgents();
+    this.upstreamAgents = createUpstreamProxyAgents(this.upstreamProxySettings);
   }
 
   getInterceptor(): Interceptor {
@@ -105,6 +124,18 @@ export class ProxyEngine extends EventEmitter {
 
   setThrottleSettings(settings: ThrottleSettings): void {
     this.throttleSettings = normalizeThrottleSettings(settings);
+  }
+
+  getUpstreamProxySettings(): UpstreamProxySettings {
+    return this.upstreamProxySettings;
+  }
+
+  setUpstreamProxySettings(settings: UpstreamProxySettings): void {
+    this.upstreamProxySettings = normalizeUpstreamProxySettings(settings);
+    this.upstreamAgents = createUpstreamProxyAgents(this.upstreamProxySettings);
+    const activeAgents = this.getDefaultAgents();
+    this.proxy.httpAgent = activeAgents.httpAgent;
+    this.proxy.httpsAgent = activeAgents.httpsAgent;
   }
 
   setPort(port: number): void {
@@ -256,6 +287,12 @@ export class ProxyEngine extends EventEmitter {
       const requestMethod = ctx.clientToProxyRequest.method || 'GET';
       const requestHost = ctx.clientToProxyRequest.headers.host || '';
       const requestUrl = (ctx.isSSL ? 'https' : 'http') + '://' + requestHost + ctx.clientToProxyRequest.url;
+      const useUpstreamProxy = this.shouldUseUpstreamProxy(requestUrl, requestHost);
+
+      if (ctx.proxyToServerRequestOptions) {
+        const agents = useUpstreamProxy ? (this.upstreamAgents ?? this.directAgents) : this.directAgents;
+        ctx.proxyToServerRequestOptions.agent = ctx.isSSL ? agents.httpsAgent : agents.httpAgent;
+      }
 
       if (!this.interceptor.shouldCapture(requestUrl, requestMethod)) {
         callback();
@@ -276,6 +313,7 @@ export class ProxyEngine extends EventEmitter {
       if (throttleProfile.active) {
         initialTags.push('throttled', `throttle-${throttleProfile.id}`);
       }
+      let upstreamProxyNote: string | undefined;
 
       const request: HttpRequest = {
         id: randomUUID(),
@@ -292,6 +330,13 @@ export class ProxyEngine extends EventEmitter {
       if (this.noCacheEnabled) {
         applyNoCacheToRequestHeaders(request.headers);
         applyNoCacheToRequestHeaders(ctx.clientToProxyRequest.headers as Record<string, string | string[]>);
+      }
+
+      if (useUpstreamProxy) {
+        initialTags.push('upstream-proxy', `upstream-${this.upstreamProxySettings.type}`);
+        upstreamProxyNote = `Forwarded through ${this.upstreamProxySettings.type.toUpperCase()} upstream proxy ${this.upstreamProxySettings.host}:${this.upstreamProxySettings.port}`;
+      } else if (this.upstreamProxySettings.enabled) {
+        initialTags.push('upstream-proxy-bypass');
       }
 
       // Check map local
@@ -334,6 +379,7 @@ export class ProxyEngine extends EventEmitter {
         request,
         state: 'pending',
         tags: [...initialTags],
+        notes: upstreamProxyNote,
         createdAt: startTime,
         timing: { start: startTime },
       };
@@ -562,6 +608,8 @@ export class ProxyEngine extends EventEmitter {
           sslCaDir: this.certManager.getSslCaDir(),
           keepAlive: true,
           forceSNI: true,
+          httpAgent: this.getDefaultAgents().httpAgent,
+          httpsAgent: this.getDefaultAgents().httpsAgent,
         },
         (err?: Error) => {
           if (err) {
@@ -590,5 +638,17 @@ export class ProxyEngine extends EventEmitter {
       this.origStderrWrite = null;
     }
     this.emit('proxy:stopped');
+  }
+
+  private getDefaultAgents(): UpstreamProxyAgents {
+    return this.upstreamAgents ?? this.directAgents;
+  }
+
+  private shouldUseUpstreamProxy(requestUrl: string, requestHost: string): boolean {
+    if (!this.upstreamProxySettings.enabled || !this.upstreamAgents || !this.upstreamProxySettings.host) {
+      return false;
+    }
+
+    return !shouldBypassUpstreamProxy(requestUrl, requestHost, this.upstreamProxySettings.bypassPatterns);
   }
 }
