@@ -4,6 +4,7 @@ import TrafficRow from './TrafficRow';
 import ContextMenu from './ContextMenu';
 import type { ContextMenuItem } from './ContextMenu';
 import { flowToCurl } from '../../utils/curl';
+import { useAppStore } from '../../stores/app';
 import { useRulesStore } from '../../stores/rules';
 import type { HttpFlow, HttpHeaders } from '../../../shared/types';
 
@@ -135,6 +136,7 @@ function saveVisibleColumns(columns: Set<ColumnKey>) {
 }
 
 export default function TrafficList({ flows, selectedId, onSelect }: Props) {
+  const trafficRowColorMode = useAppStore((state) => state.trafficRowColorMode);
   const [sort, setSort] = useState<SortState>({ column: null, direction: 'asc' });
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [visibleColumns, setVisibleColumns] = useState<Set<ColumnKey>>(loadVisibleColumns);
@@ -369,6 +371,7 @@ export default function TrafficList({ flows, selectedId, onSelect }: Props) {
             onSelect={onSelect}
             onContextMenu={handleContextMenu}
             visibleColumns={visibleColumns}
+            colorMode={trafficRowColorMode}
             columnKey={columnKey}
           />
         )}

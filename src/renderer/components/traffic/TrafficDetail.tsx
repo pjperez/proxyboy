@@ -25,6 +25,8 @@ export default function TrafficDetail({ flow, onClose }: Props) {
   const hasPreview = isImageFlow(flow);
   const hasCookies = hasHeaderValue(flow.request.headers.cookie) || hasHeaderValue(flow.response?.headers['set-cookie']);
   const [tab, setTab] = useState<Tab>(hasPreview ? 'preview' : 'request');
+  const hasSslPinningWarning = flow.tags.includes('ssl-pinning-suspected');
+  const sslPinningMessage = flow.notes?.split('\n').slice(0, 3).join(' ');
 
   const tabs: { id: Tab; label: string; show: boolean }[] = [
     { id: 'request', label: 'Request', show: true },
@@ -88,6 +90,22 @@ export default function TrafficDetail({ flow, onClose }: Props) {
 
       {/* Content */}
       <div className="flex-1 overflow-y-auto p-3">
+        {hasSslPinningWarning && (
+          <div className="mb-3 rounded-lg border border-pb-warning/40 bg-pb-warning/10 px-4 py-3 text-sm">
+            <div className="font-medium text-pb-warning">Possible certificate pinning failure</div>
+            <p className="mt-1 text-pb-text">
+              {sslPinningMessage || 'The client appears to have rejected the MITM certificate during TLS setup.'}
+            </p>
+            <a
+              href="https://github.com/pjperez/proxyboy#troubleshooting-ssl"
+              target="_blank"
+              rel="noreferrer"
+              className="mt-2 inline-flex text-xs font-medium text-pb-accent hover:underline"
+            >
+              Open SSL troubleshooting tips
+            </a>
+          </div>
+        )}
         {tab === 'request' && <RequestView request={flow.request} />}
         {tab === 'response' && flow.response && <ResponseView response={flow.response} />}
         {tab === 'response' && !flow.response && (

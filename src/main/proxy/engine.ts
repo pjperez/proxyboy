@@ -8,6 +8,7 @@ import { INTERNAL_REPLAY_HEADER } from '../../shared/constants';
 import { CertificateManager } from './certificate';
 import { Interceptor } from './interceptor';
 import { DnsResolverService } from './dns-resolver';
+import { buildSslPinningGuidance, isSuspectedSslPinningError } from './ssl-pinning';
 import { ProxyEngineOptions } from './types';
 import { annotateGraphQLRequest } from '../../shared/graphql';
 import { applyNoCacheToRequestHeaders, applyNoCacheToResponseHeaders } from './no-cache';
@@ -122,18 +123,44 @@ export class ProxyEngine extends EventEmitter {
     this.flows.clear();
   }
 
+  private markFlowAsSslPinningSuspected(flowId: string | undefined, error: unknown): void {
+    if (!flowId) {
+      return;
+    }
+
+    const flow = this.flows.get(flowId);
+    if (!flow || flow.tags.includes('ssl-pinning-suspected')) {
+      return;
+    }
+
+    flow.state = 'error';
+    flow.tags.push('ssl-pinning-suspected');
+    flow.notes = flow.notes
+      ? `${flow.notes}\n${buildSslPinningGuidance(error)}`
+      : buildSslPinningGuidance(error);
+    if (flow.timing && flow.timing.responseEnd == null) {
+      flow.timing.responseEnd = Date.now();
+    }
+    this.flows.set(flowId, flow);
+    this.emit('flow:complete', flow);
+  }
+
   private setup(): void {
     if (this.setupDone) return;
     this.setupDone = true;
 
     this.proxy.onError((ctx, err, errorKind) => {
+      const proxyContext = ctx as { proxyboyFlowId?: unknown };
+      const flowId = typeof proxyContext.proxyboyFlowId === 'string' ? proxyContext.proxyboyFlowId : undefined;
+      const suspectedSslPinning = isSuspectedSslPinningError(err);
+
       // Suppress ALL common transient errors silently
       const suppressedKinds = [
         'HTTPS_CLIENT_ERROR',
         'PROXY_TO_SERVER_REQUEST_ERROR',
         'ERR_HTTP_REQUEST_TIMEOUT',
       ];
-      if (suppressedKinds.includes(errorKind || '')) return;
+      if (suppressedKinds.includes(errorKind || '') && !suspectedSslPinning) return;
 
       const suppressedCodes = [
         'ECONNRESET',
@@ -144,7 +171,11 @@ export class ProxyEngine extends EventEmitter {
         'ERR_HTTP_REQUEST_TIMEOUT',
         'HPE_HEADER_OVERFLOW',
       ];
-      if (err && suppressedCodes.includes((err as any)?.code)) return;
+      if (err && suppressedCodes.includes((err as any)?.code) && !suspectedSslPinning) return;
+
+      if (suspectedSslPinning) {
+        this.markFlowAsSslPinningSuspected(flowId, err);
+      }
 
       if (err) this.emit('proxy:error', err);
     });
@@ -212,6 +243,7 @@ export class ProxyEngine extends EventEmitter {
       }
 
       const flowId = randomUUID();
+      ctx.proxyboyFlowId = flowId;
       const chunks: Buffer[] = [];
       const startTime = Date.now();
       const replayed = Boolean(ctx.clientToProxyRequest.headers[INTERNAL_REPLAY_HEADER]);

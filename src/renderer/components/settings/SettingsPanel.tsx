@@ -1,8 +1,18 @@
 import React, { useState, useEffect } from 'react';
 import { useAppStore } from '../../stores/app';
+import type { TrafficRowColorMode } from '../../utils/traffic-row-colors';
+import { resolveThemePreference } from '../../utils/theme';
 
 export default function SettingsPanel() {
-  const { proxyPort, theme, noCacheEnabled, setNoCacheEnabled } = useAppStore();
+  const {
+    proxyPort,
+    theme,
+    noCacheEnabled,
+    trafficRowColorMode,
+    setNoCacheEnabled,
+    setTheme,
+    setTrafficRowColorMode,
+  } = useAppStore();
   const [autoStart, setAutoStart] = useState(() =>
     localStorage.getItem('proxyboy-auto-start') === 'true'
   );
@@ -89,6 +99,8 @@ export default function SettingsPanel() {
     window.proxyboy?.dns.clearCache();
   };
 
+  const resolvedTheme = resolveThemePreference(theme);
+
   return (
     <div className="flex-1 overflow-y-auto p-6">
       <h1 className="text-xl font-semibold text-pb-text mb-6">Settings</h1>
@@ -126,6 +138,24 @@ export default function SettingsPanel() {
           >
             {installing ? 'Installing…' : certStatus === 'installed' ? 'Installed' : 'Install Certificate'}
           </button>
+        </Row>
+        <Row label="Pinning troubleshooting">
+          <div className="max-w-md text-right text-xs text-pb-text-dim">
+            Some apps reject ProxyBoy&apos;s local CA even after it is installed because they pin certificates.
+            <div className="mt-1 space-y-1">
+              <div>Android debug builds: trust a debug network security config or use a debug-only bypass.</div>
+              <div>iOS simulators: prefer debug builds or Frida-style instrumentation when pinning is enforced.</div>
+              <div>Desktop apps: look for developer flags, debug certificates, or test-specific trust overrides.</div>
+            </div>
+            <a
+              href="https://github.com/pjperez/proxyboy#troubleshooting-ssl"
+              target="_blank"
+              rel="noreferrer"
+              className="mt-2 inline-flex text-pb-accent hover:underline"
+            >
+              Read the full SSL troubleshooting guide
+            </a>
+          </div>
         </Row>
       </Section>
 
@@ -196,9 +226,46 @@ export default function SettingsPanel() {
       {/* Appearance */}
       <Section title="Appearance">
         <Row label="Theme">
+          <div className="flex flex-col items-end gap-2">
+            <div className="flex gap-2">
+              <OptionButton
+                label="Dark"
+                active={theme === 'dark'}
+                onClick={() => setTheme('dark')}
+              />
+              <OptionButton
+                label="Light"
+                active={theme === 'light'}
+                onClick={() => setTheme('light')}
+              />
+              <OptionButton
+                label="System"
+                active={theme === 'system'}
+                onClick={() => setTheme('system')}
+              />
+            </div>
+            <span className="text-xs text-pb-text-dim">
+              System follows Windows appearance. Currently using {resolvedTheme}.
+            </span>
+          </div>
+        </Row>
+        <Row label="Traffic row colors">
           <div className="flex gap-2">
-            <ThemeOption label="Dark" active={theme === 'dark'} />
-            <ThemeOption label="Light" disabled />
+            <OptionButton
+              label="Off"
+              active={trafficRowColorMode === 'off'}
+              onClick={() => setTrafficRowColorMode('off')}
+            />
+            <OptionButton
+              label="By Status"
+              active={trafficRowColorMode === 'status'}
+              onClick={() => setTrafficRowColorMode('status')}
+            />
+            <OptionButton
+              label="By Content Type"
+              active={trafficRowColorMode === 'content-type'}
+              onClick={() => setTrafficRowColorMode('content-type')}
+            />
           </div>
         </Row>
       </Section>
@@ -270,15 +337,28 @@ function CertBadge({ status }: { status: 'checking' | 'installed' | 'not-install
   );
 }
 
-function ThemeOption({ label, active, disabled }: { label: string; active?: boolean; disabled?: boolean }) {
+function OptionButton({
+  label,
+  active,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  active?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
+}) {
   return (
-    <span
+    <button
+      type="button"
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
       className={`px-3 py-1.5 rounded text-sm transition-colors
         ${active ? 'bg-pb-accent/20 text-pb-accent border border-pb-accent/40' : ''}
         ${disabled ? 'text-pb-text-dim border border-pb-border opacity-50 cursor-not-allowed' : ''}
         ${!active && !disabled ? 'text-pb-text border border-pb-border hover:bg-pb-surface-hover cursor-pointer' : ''}`}
     >
       {label}{disabled ? ' (coming soon)' : ''}
-    </span>
+    </button>
   );
 }
