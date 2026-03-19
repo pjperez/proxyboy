@@ -88,7 +88,7 @@ function MainApp() {
   const clearComparison = useTrafficStore(s => s.clearComparison);
   const getFilteredFlows = useTrafficStore(s => s.getFilteredFlows);
   const { addRule } = useRulesStore();
-  const { proxyRunning, setProxyRunning, setNoCacheEnabled, setThrottleSettings, theme } = useAppStore();
+  const { proxyRunning, setProxyRunning, setNoCacheEnabled, setThrottleSettings, setUpdateState, theme } = useAppStore();
 
   useEffect(() => {
     const syncTheme = () => {
@@ -123,10 +123,19 @@ function MainApp() {
     const unsubBreakpoint = api.breakpoint?.onPaused?.((data: any) => {
       setBreakpointPause(data);
     });
+    const unsubUpdateState = api.app.onUpdateState((state: any) => {
+      setUpdateState(state);
+    });
 
     api.traffic.getFlows().then((loadedFlows: any[]) => {
       if (Array.isArray(loadedFlows)) {
         setFlows(loadedFlows);
+      }
+    }).catch(() => {});
+
+    api.app.getUpdateState().then((state: any) => {
+      if (state?.currentVersion) {
+        setUpdateState(state);
       }
     }).catch(() => {});
 
@@ -153,6 +162,7 @@ function MainApp() {
       unsubComplete();
       unsubRuleCreated?.();
       unsubBreakpoint?.();
+      unsubUpdateState?.();
       unsubAgentClosed();
     };
   }, []);
