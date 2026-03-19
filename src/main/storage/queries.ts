@@ -178,6 +178,33 @@ export function deleteRule(id: string): void {
   schedulePersist();
 }
 
+export function getAppSetting(key: string): string | null {
+  const db = getDatabase();
+  const stmt = db.prepare('SELECT value FROM app_settings WHERE key = ? LIMIT 1');
+  stmt.bind([key]);
+
+  let value: string | null = null;
+  if (stmt.step()) {
+    const row = stmt.getAsObject();
+    value = row.value as string;
+  }
+  stmt.free();
+
+  return value;
+}
+
+export function setAppSetting(key: string, value: string): void {
+  const db = getDatabase();
+  const updatedAt = Date.now();
+  db.run(
+    `INSERT INTO app_settings (key, value, updated_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    [key, value, updatedAt],
+  );
+  schedulePersist();
+}
+
 function rowToFlow(row: any): HttpFlow {
   const request: HttpRequest = {
     id: row.req_id,

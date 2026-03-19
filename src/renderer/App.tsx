@@ -74,7 +74,7 @@ function MainApp() {
   const updateFlow = useTrafficStore(s => s.updateFlow);
   const getFilteredFlows = useTrafficStore(s => s.getFilteredFlows);
   const { addRule } = useRulesStore();
-  const { proxyRunning, setProxyRunning } = useAppStore();
+  const { proxyRunning, setProxyRunning, setNoCacheEnabled } = useAppStore();
 
   useEffect(() => {
     const api = window.proxyboy;
@@ -105,6 +105,7 @@ function MainApp() {
 
     api.proxy.getStatus().then((status: any) => {
       setProxyRunning(status.running);
+      setNoCacheEnabled(!!status.noCacheEnabled);
       if (status.port) {
         useAppStore.getState().setProxyPort(status.port);
       }

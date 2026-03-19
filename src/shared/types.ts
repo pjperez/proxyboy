@@ -69,6 +69,7 @@ export interface ProxyState {
   port: number;
   host: string;
   isSystemProxy: boolean;
+  noCacheEnabled: boolean;
   totalRequests: number;
   activeConnections: number;
   sslEnabled: boolean;
