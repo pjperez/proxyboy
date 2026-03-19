@@ -73,6 +73,7 @@ export interface ProxyState {
   port: number;
   host: string;
   isSystemProxy: boolean;
+  noCacheEnabled: boolean;
   totalRequests: number;
   activeConnections: number;
   sslEnabled: boolean;
@@ -82,6 +83,7 @@ export interface ProxyState {
 export interface FilterCriteria {
   text?: string;
   graphqlOperationName?: string;
+  searchBodies?: boolean;
   methods?: string[];
   statusCodes?: StatusCodeRange[];
   contentTypes?: string[];
@@ -98,7 +100,8 @@ export interface StatusCodeRange {
 }
 
 // Rule types
-export type RuleType = 'breakpoint' | 'map-local';
+export type CaptureFilterMode = 'capture-all' | 'allow-list' | 'block-list';
+export type RuleType = 'breakpoint' | 'map-local' | 'allow-list' | 'block-list';
 
 export interface Rule {
   id: string;
@@ -126,6 +129,14 @@ export interface MapLocalRule extends Rule {
   localFilePath: string;
   statusCode?: number;
   responseHeaders?: HttpHeaders;
+}
+
+export interface AllowListRule extends Rule {
+  type: 'allow-list';
+}
+
+export interface BlockListRule extends Rule {
+  type: 'block-list';
 }
 
 // Agent types

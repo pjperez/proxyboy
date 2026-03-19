@@ -77,6 +77,10 @@ export default function FilterBar() {
     setFilter({ ...filter, hasError: !filter.hasError });
   };
 
+  const toggleBodySearch = () => {
+    setFilter({ ...filter, searchBodies: filter.searchBodies ? undefined : true });
+  };
+
   const clearFilters = () => {
     setSearchText('');
     setGraphqlText('');
@@ -85,15 +89,17 @@ export default function FilterBar() {
     setFilter({});
   };
 
-  const hasFilters =
+  const hasFilters = Boolean(
     searchText ||
     graphqlText ||
     minDurationText ||
     maxDurationText ||
+    (searchText && filter.searchBodies) ||
     filter.methods?.length ||
     filter.statusCodes?.length ||
     filter.contentTypes?.length ||
-    filter.hasError;
+    filter.hasError
+  );
 
   return (
     <div className="flex items-center gap-2 px-3 py-2 bg-pb-surface border-b border-pb-border overflow-x-auto">
@@ -104,7 +110,7 @@ export default function FilterBar() {
           type="text"
           value={searchText}
           onChange={(e) => handleSearch(e.target.value)}
-          placeholder="Filter URL... (Ctrl+F)"
+          placeholder={filter.searchBodies ? 'Filter URL, host, or body... (Ctrl+F)' : 'Filter URL or host... (Ctrl+F)'}
           className="w-full h-7 bg-pb-bg border border-pb-border rounded px-3 pr-8 text-xs text-pb-text placeholder-pb-text-dim focus:outline-none focus:border-pb-accent"
         />
         {searchText && (
@@ -133,6 +139,11 @@ export default function FilterBar() {
           </button>
         )}
       </div>
+      <FilterChip
+        label="Body"
+        active={filter.searchBodies || false}
+        onClick={toggleBodySearch}
+      />
 
       {/* Method filters */}
       <div className="flex items-center gap-1 shrink-0">

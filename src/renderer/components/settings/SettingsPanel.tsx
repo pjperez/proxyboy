@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useAppStore } from '../../stores/app';
 
 export default function SettingsPanel() {
-  const { proxyPort, theme } = useAppStore();
+  const { proxyPort, theme, noCacheEnabled, setNoCacheEnabled } = useAppStore();
   const [autoStart, setAutoStart] = useState(() =>
     localStorage.getItem('proxyboy-auto-start') === 'true'
   );
@@ -31,6 +31,14 @@ export default function SettingsPanel() {
     const next = !autoStart;
     setAutoStart(next);
     localStorage.setItem('proxyboy-auto-start', String(next));
+  };
+
+  const handleNoCacheToggle = async () => {
+    const next = !noCacheEnabled;
+    const result = await window.proxyboy?.proxy.setNoCache(next);
+    if (result?.success) {
+      setNoCacheEnabled(next);
+    }
   };
 
   const handleInstallCert = async () => {
@@ -97,6 +105,9 @@ export default function SettingsPanel() {
         </Row>
         <Row label="Auto-start proxy on launch">
           <Toggle checked={autoStart} onChange={handleAutoStartToggle} />
+        </Row>
+        <Row label="Disable caching for future requests">
+          <Toggle checked={noCacheEnabled} onChange={handleNoCacheToggle} />
         </Row>
       </Section>
 

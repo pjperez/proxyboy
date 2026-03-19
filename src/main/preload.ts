@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../shared/constants';
-import type { ProxyState, HttpFlow, Rule, FilterCriteria } from '../shared/types';
+import type { ProxyState, HttpFlow, Rule, FilterCriteria, CaptureFilterMode } from '../shared/types';
 
 const api = {
   // Proxy control
@@ -9,6 +9,7 @@ const api = {
     stop: () => ipcRenderer.invoke(IPC_CHANNELS.PROXY_STOP),
     getStatus: (): Promise<ProxyState> => ipcRenderer.invoke(IPC_CHANNELS.PROXY_STATUS),
     setSystemProxy: (enabled: boolean) => ipcRenderer.invoke(IPC_CHANNELS.PROXY_SET_SYSTEM, enabled),
+    setNoCache: (enabled: boolean) => ipcRenderer.invoke(IPC_CHANNELS.PROXY_SET_NO_CACHE, enabled),
     installCert: () => ipcRenderer.invoke(IPC_CHANNELS.PROXY_INSTALL_CERT),
     getCertStatus: () => ipcRenderer.invoke(IPC_CHANNELS.PROXY_CERT_STATUS),
   },
@@ -20,6 +21,8 @@ const api = {
     getFlow: (id: string): Promise<HttpFlow | null> =>
       ipcRenderer.invoke(IPC_CHANNELS.TRAFFIC_GET_FLOW, id),
     clear: () => ipcRenderer.invoke(IPC_CHANNELS.TRAFFIC_CLEAR),
+    delete: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TRAFFIC_DELETE, id),
+    repeat: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TRAFFIC_REPEAT, id),
     onNewFlow: (callback: (flow: HttpFlow) => void) => {
       const handler = (_event: any, flow: HttpFlow) => callback(flow);
       ipcRenderer.on(IPC_CHANNELS.TRAFFIC_NEW_FLOW, handler);
@@ -40,6 +43,10 @@ const api = {
     update: (rule: Rule) => ipcRenderer.invoke(IPC_CHANNELS.RULES_UPDATE, rule),
     delete: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.RULES_DELETE, id),
     toggle: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.RULES_TOGGLE, id),
+    getCaptureMode: (): Promise<{ success: boolean; mode: CaptureFilterMode }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.RULES_GET_CAPTURE_MODE),
+    setCaptureMode: (mode: CaptureFilterMode): Promise<{ success: boolean; mode: CaptureFilterMode; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.RULES_SET_CAPTURE_MODE, mode),
     onRuleCreated: (callback: (rule: Rule) => void) => {
       const handler = (_event: any, rule: Rule) => callback(rule);
       ipcRenderer.on(IPC_CHANNELS.RULES_CREATED, handler);

@@ -160,6 +160,12 @@ export function clearAllFlows(): void {
   schedulePersist();
 }
 
+export function deleteFlow(id: string): void {
+  const db = getDatabase();
+  db.run('DELETE FROM flows WHERE id = ?', [id]);
+  schedulePersist();
+}
+
 export function saveRule(rule: Rule): void {
   const db = getDatabase();
   db.run(
@@ -189,6 +195,33 @@ export function getRules(): Rule[] {
 export function deleteRule(id: string): void {
   const db = getDatabase();
   db.run('DELETE FROM rules WHERE id = ?', [id]);
+  schedulePersist();
+}
+
+export function getAppSetting(key: string): string | null {
+  const db = getDatabase();
+  const stmt = db.prepare('SELECT value FROM app_settings WHERE key = ? LIMIT 1');
+  stmt.bind([key]);
+
+  let value: string | null = null;
+  if (stmt.step()) {
+    const row = stmt.getAsObject();
+    value = typeof row.value === 'string' ? row.value : null;
+  }
+
+  stmt.free();
+  return value;
+}
+
+export function setAppSetting(key: string, value: string): void {
+  const db = getDatabase();
+  const updatedAt = Date.now();
+  db.run(
+    `INSERT INTO app_settings (key, value, updated_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    [key, value, updatedAt],
+  );
   schedulePersist();
 }
 

@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useAppStore } from '../../stores/app';
 import { useTrafficStore } from '../../stores/traffic';
+import { exportHarFile, importHarFile, toggleProxyRecording } from '../../utils/app-actions';
 
 export default function StatusBar() {
-  const { proxyRunning, proxyPort } = useAppStore();
+  const { proxyRunning, proxyPort, noCacheEnabled, setNoCacheEnabled } = useAppStore();
   const { flows } = useTrafficStore();
   const [certInstalled, setCertInstalled] = useState<boolean | null>(null);
   const [certInstalling, setCertInstalling] = useState(false);
@@ -18,31 +19,23 @@ export default function StatusBar() {
     window.proxyboy?.proxy.getCertStatus().then((s: any) => {
       setCertInstalled(s.installed);
     });
-    if (proxyRunning) {
-      window.proxyboy?.proxy.getStatus().then((s: any) => {
-        setIsSystemProxy(!!s?.isSystemProxy);
-      });
-    } else {
-      setIsSystemProxy(false);
-    }
-  }, [proxyRunning]);
+    window.proxyboy?.proxy.getStatus().then((s: any) => {
+      setIsSystemProxy(!!s?.isSystemProxy);
+      setNoCacheEnabled(!!s?.noCacheEnabled);
+    });
+  }, [proxyRunning, setNoCacheEnabled]);
 
   const toggleProxy = async () => {
-    const api = window.proxyboy;
-    if (!api) return;
-    if (proxyRunning) {
-      if (isSystemProxy) {
-        await api.proxy.setSystemProxy(false);
-        setIsSystemProxy(false);
-      }
-      await api.proxy.stop();
-      useAppStore.getState().setProxyRunning(false);
-    } else {
-      const result = await api.proxy.start();
-      useAppStore.getState().setProxyRunning(true);
-      if (result?.port) {
-        useAppStore.getState().setProxyPort(result.port);
-      }
+    const result = await toggleProxyRecording(window.proxyboy, proxyRunning, isSystemProxy);
+    if (!result.success) {
+      window.alert(result.error);
+      return;
+    }
+
+    setIsSystemProxy(result.isSystemProxy);
+    useAppStore.getState().setProxyRunning(result.running);
+    if (result.port) {
+      useAppStore.getState().setProxyPort(result.port);
     }
   };
 
@@ -58,10 +51,18 @@ export default function StatusBar() {
     }
   };
 
+  const toggleNoCache = async () => {
+    const result = await window.proxyboy?.proxy.setNoCache(!noCacheEnabled);
+    if (result?.success) {
+      setNoCacheEnabled(!noCacheEnabled);
+    }
+  };
+
   return (
     <div className="h-7 bg-pb-surface flex items-center px-4 border-t border-pb-border text-xs select-none">
       <button
         onClick={toggleProxy}
+        title={proxyRunning ? 'Stop recording (Ctrl+E)' : 'Start recording (Ctrl+E)'}
         className={`flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium transition-colors
           ${proxyRunning ? 'text-pb-success hover:bg-pb-success/10' : 'text-pb-error hover:bg-pb-error/10'}`}
       >
@@ -76,6 +77,15 @@ export default function StatusBar() {
       <span className="text-pb-text-dim">
         Requests: <span className="text-pb-text">{flows.length}</span>
       </span>
+      <span className="mx-3 text-pb-border">|</span>
+      <button
+        onClick={toggleNoCache}
+        className={`flex items-center gap-1 transition-colors ${
+          noCacheEnabled ? 'text-pb-accent' : 'text-pb-text-dim hover:text-pb-text'
+        }`}
+      >
+        🧊 {noCacheEnabled ? 'No Cache: ON' : 'No Cache: OFF'}
+      </button>
       {errorCount > 0 && (
         <>
           <span className="mx-3 text-pb-border">|</span>
@@ -115,24 +125,32 @@ export default function StatusBar() {
       )}
       <div className="flex-1" />
       <button
-        onClick={() => window.proxyboy?.app.exportHar()}
+        onClick={async () => {
+          const result = await exportHarFile(window.proxyboy);
+          if (!result.success && !result.canceled) {
+            window.alert(result.error);
+          }
+        }}
         className="text-pb-text-dim hover:text-pb-text transition-colors"
-        title="Export HAR"
+        title="Export HAR (Ctrl+S)"
       >
         📤 Export
       </button>
       <span className="mx-2 text-pb-border">|</span>
       <button
         onClick={async () => {
-          await window.proxyboy?.app.importHar();
+          const result = await importHarFile(window.proxyboy);
+          if (!result.success && !result.canceled) {
+            window.alert(result.error);
+          }
         }}
         className="text-pb-text-dim hover:text-pb-text transition-colors"
-        title="Import HAR"
+        title="Import HAR (Ctrl+I)"
       >
         📥 Import
       </button>
       <span className="mx-2 text-pb-border">|</span>
-      <span className="text-pb-text-dim">Ctrl+Shift+A for AI</span>
+      <span className="text-pb-text-dim">? for shortcuts, Ctrl+Shift+A for AI</span>
     </div>
   );
 }

@@ -4,16 +4,29 @@ import { IPC_CHANNELS } from '../../shared/constants';
 import { ProxyEngine } from '../proxy/engine';
 import { CertificateManager } from '../proxy/certificate';
 import { AgentClient } from '../agent/client';
+import { replayFlowThroughProxy } from '../proxy/replay';
 import { setSystemProxy, clearSystemProxy, isSystemProxyEnabled } from '../utils/windows-proxy';
-import { ProxyState, Rule, HttpFlow } from '../../shared/types';
+import { ProxyState, Rule, HttpFlow, CaptureFilterMode } from '../../shared/types';
 import { flowsToHar } from '../utils/har';
 import { randomUUID } from 'crypto';
-import { saveFlow, clearAllFlows, saveRule, getRules, getFlows as getStoredFlows, deleteRule as dbDeleteRule } from '../storage/queries';
 import { annotateGraphQLRequest } from '../../shared/graphql';
+import {
+  saveFlow,
+  clearAllFlows,
+  saveRule,
+  getRules,
+  getFlows as getStoredFlows,
+  deleteRule as dbDeleteRule,
+  deleteFlow as deleteStoredFlow,
+  getAppSetting,
+  setAppSetting,
+} from '../storage/queries';
 import * as fs from 'fs';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
 declare const MAIN_WINDOW_VITE_NAME: string;
+
+const NO_CACHE_SETTING_KEY = 'proxy:no-cache-enabled';
 
 export function registerIpcHandlers(
   mainWindow: BrowserWindow,
@@ -89,12 +102,23 @@ export function registerIpcHandlers(
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.PROXY_SET_NO_CACHE, async (_event, enabled: boolean) => {
+    try {
+      proxyEngine.setNoCacheEnabled(enabled);
+      setAppSetting(NO_CACHE_SETTING_KEY, enabled ? 'true' : 'false');
+      return { success: true, enabled };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.PROXY_STATUS, async (): Promise<ProxyState> => {
     return {
       running: proxyEngine.isRunning(),
       port: proxyEngine.getPort(),
       host: '127.0.0.1',
       isSystemProxy: await isSystemProxyEnabled(),
+      noCacheEnabled: proxyEngine.isNoCacheEnabled(),
       totalRequests: proxyEngine.getFlowCount(),
       activeConnections: 0,
       sslEnabled: true,
@@ -129,6 +153,43 @@ export function registerIpcHandlers(
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.TRAFFIC_DELETE, (_event, id: string) => {
+    try {
+      const flow = proxyEngine.getFlow(id);
+      if (!flow) {
+        return { success: false, error: 'That request is no longer available.' };
+      }
+
+      if (!['complete', 'error', 'blocked'].includes(flow.state)) {
+        return { success: false, error: 'Only completed requests can be removed from the list.' };
+      }
+
+      proxyEngine.deleteFlow(id);
+      deleteStoredFlow(id);
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TRAFFIC_REPEAT, async (_event, id: string) => {
+    try {
+      if (!proxyEngine.isRunning()) {
+        return { success: false, error: 'Start the proxy before replaying a request.' };
+      }
+
+      const flow = proxyEngine.getFlow(id);
+      if (!flow) {
+        return { success: false, error: 'That request is no longer available to replay.' };
+      }
+
+      await replayFlowThroughProxy(flow, proxyEngine.getPort());
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
   // Rules
   const rules: Map<string, Rule> = new Map();
 
@@ -146,12 +207,27 @@ export function registerIpcHandlers(
   }
 
   try {
+    const savedCaptureMode = getAppSetting('capture_mode');
+    if (savedCaptureMode === 'capture-all' || savedCaptureMode === 'allow-list' || savedCaptureMode === 'block-list') {
+      proxyEngine.getInterceptor().setCaptureMode(savedCaptureMode);
+    }
+  } catch (err) {
+    console.error('Failed to load capture mode from database:', err);
+  }
+
+  try {
     const persistedFlows = getStoredFlows().reverse();
     for (const flow of persistedFlows) {
       proxyEngine.addFlow(flow);
     }
   } catch (err) {
     console.error('Failed to load persisted flows from database:', err);
+  }
+
+  try {
+    proxyEngine.setNoCacheEnabled(getAppSetting(NO_CACHE_SETTING_KEY) === 'true');
+  } catch (err) {
+    console.error('Failed to load no-cache setting from database:', err);
   }
 
   agentClient.setRuleManager({
@@ -225,6 +301,28 @@ export function registerIpcHandlers(
       return null;
     } catch (error: any) {
       return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.RULES_GET_CAPTURE_MODE, () => {
+    try {
+      return { success: true, mode: proxyEngine.getInterceptor().getCaptureMode() };
+    } catch (error: any) {
+      return { success: false, mode: 'capture-all', error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.RULES_SET_CAPTURE_MODE, (_event, mode: CaptureFilterMode) => {
+    try {
+      if (!['capture-all', 'allow-list', 'block-list'].includes(mode)) {
+        return { success: false, mode: proxyEngine.getInterceptor().getCaptureMode(), error: 'Invalid capture mode.' };
+      }
+
+      proxyEngine.getInterceptor().setCaptureMode(mode);
+      setAppSetting('capture_mode', mode);
+      return { success: true, mode };
+    } catch (error: any) {
+      return { success: false, mode: proxyEngine.getInterceptor().getCaptureMode(), error: error.message };
     }
   });
 

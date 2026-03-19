@@ -22,3 +22,80 @@ describe('Interceptor regex hardening', () => {
     expect(interceptor.matchesUrl('(?=https://)https://example\\.com', 'https://example.com', true)).toBe(false);
   });
 });
+
+describe('Interceptor capture filters', () => {
+  it('skips matching traffic in block-list mode', () => {
+    const interceptor = new Interceptor();
+    interceptor.setRules([
+      {
+        id: 'block-api',
+        type: 'block-list',
+        name: 'Block API',
+        enabled: true,
+        matchCriteria: { urlPattern: '*/api/*' },
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    ]);
+    interceptor.setCaptureMode('block-list');
+
+    expect(interceptor.shouldCapture('https://example.com/api/users', 'GET')).toBe(false);
+    expect(interceptor.shouldCapture('https://example.com/assets/logo.png', 'GET')).toBe(true);
+  });
+
+  it('captures only matching traffic in allow-list mode', () => {
+    const interceptor = new Interceptor();
+    interceptor.setRules([
+      {
+        id: 'allow-posts',
+        type: 'allow-list',
+        name: 'Allow POSTs',
+        enabled: true,
+        matchCriteria: { urlPattern: '*/api/*', methods: ['POST'] },
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    ]);
+    interceptor.setCaptureMode('allow-list');
+
+    expect(interceptor.shouldCapture('https://example.com/api/users', 'POST')).toBe(true);
+    expect(interceptor.shouldCapture('https://example.com/api/users', 'GET')).toBe(false);
+    expect(interceptor.shouldCapture('https://example.com/assets/logo.png', 'POST')).toBe(false);
+  });
+
+  it('falls back to capture-all when allow-list mode has no enabled rules', () => {
+    const interceptor = new Interceptor();
+    interceptor.setRules([]);
+    interceptor.setCaptureMode('allow-list');
+
+    expect(interceptor.shouldCapture('https://example.com/api/users', 'GET')).toBe(true);
+  });
+
+  it('captures everything in capture-all mode even when filter rules exist', () => {
+    const interceptor = new Interceptor();
+    interceptor.setRules([
+      {
+        id: 'allow-api',
+        type: 'allow-list',
+        name: 'Allow API',
+        enabled: true,
+        matchCriteria: { urlPattern: '*/api/*' },
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+      {
+        id: 'block-static',
+        type: 'block-list',
+        name: 'Block static',
+        enabled: true,
+        matchCriteria: { urlPattern: '*/static/*' },
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    ]);
+    interceptor.setCaptureMode('capture-all');
+
+    expect(interceptor.shouldCapture('https://example.com/api/users', 'GET')).toBe(true);
+    expect(interceptor.shouldCapture('https://example.com/static/app.js', 'GET')).toBe(true);
+  });
+});

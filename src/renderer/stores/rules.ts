@@ -1,9 +1,10 @@
 import { create } from 'zustand';
-import type { Rule, BreakpointRule, MapLocalRule } from '../../shared/types';
+import type { Rule, BreakpointRule, MapLocalRule, AllowListRule, BlockListRule, CaptureFilterMode } from '../../shared/types';
 
 interface RulesState {
   rules: Rule[];
   loading: boolean;
+  captureMode: CaptureFilterMode;
   setRules: (rules: Rule[]) => void;
   addRule: (rule: Rule) => void;
   updateRule: (rule: Rule) => void;
@@ -11,12 +12,17 @@ interface RulesState {
   toggleRule: (id: string) => void;
   getBreakpointRules: () => BreakpointRule[];
   getMapLocalRules: () => MapLocalRule[];
+  getAllowListRules: () => AllowListRule[];
+  getBlockListRules: () => BlockListRule[];
   loadRules: () => Promise<void>;
+  loadCaptureMode: () => Promise<void>;
+  setCaptureMode: (mode: CaptureFilterMode) => Promise<{ success: boolean; mode: CaptureFilterMode; error?: string }>;
 }
 
 export const useRulesStore = create<RulesState>((set, get) => ({
   rules: [],
   loading: false,
+  captureMode: 'capture-all',
 
   setRules: (rules) => set({ rules }),
 
@@ -45,16 +51,55 @@ export const useRulesStore = create<RulesState>((set, get) => ({
   getMapLocalRules: () =>
     get().rules.filter((r): r is MapLocalRule => r.type === 'map-local'),
 
+  getAllowListRules: () =>
+    get().rules.filter((r): r is AllowListRule => r.type === 'allow-list'),
+
+  getBlockListRules: () =>
+    get().rules.filter((r): r is BlockListRule => r.type === 'block-list'),
+
   loadRules: async () => {
     set({ loading: true });
     try {
       const api = (window as any).proxyboy;
-      if (api) {
+      if (api?.rules?.getAll) {
         const rules = await api.rules.getAll();
-        set({ rules, loading: false });
+        set({ rules: Array.isArray(rules) ? rules : [], loading: false });
+      } else {
+        set({ loading: false });
       }
     } catch {
       set({ loading: false });
+    }
+  },
+
+  loadCaptureMode: async () => {
+    try {
+      const api = (window as any).proxyboy;
+      if (api?.rules?.getCaptureMode) {
+        const result = await api.rules.getCaptureMode();
+        if (result?.mode) {
+          set({ captureMode: result.mode });
+        }
+      }
+    } catch {
+      // Keep the last known mode
+    }
+  },
+
+  setCaptureMode: async (mode) => {
+    const api = (window as any).proxyboy;
+    if (!api?.rules?.setCaptureMode) {
+      return { success: false, mode: get().captureMode, error: 'Capture mode controls are unavailable.' };
+    }
+
+    try {
+      const result = await api.rules.setCaptureMode(mode);
+      if (result?.success) {
+        set({ captureMode: result.mode });
+      }
+      return result;
+    } catch {
+      return { success: false, mode: get().captureMode, error: 'Failed to update the capture mode.' };
     }
   },
 }));

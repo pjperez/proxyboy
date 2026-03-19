@@ -1,38 +1,79 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { useTrafficStore } from './traffic';
+import { matchesFlowFilter, useTrafficStore } from './traffic';
 import type { HttpFlow } from '../../shared/types';
 
-function createFlow(id: string, graphqlOperationName?: string): HttpFlow {
+interface FlowOverrides extends Omit<Partial<HttpFlow>, 'request' | 'response'> {
+  request?: Partial<HttpFlow['request']>;
+  response?: Partial<NonNullable<HttpFlow['response']>>;
+}
+
+function createFlow(overrides?: FlowOverrides): HttpFlow {
+  const { request: requestOverrides, response: responseOverrides, ...flowOverrides } = overrides || {};
+
   return {
-    id,
+    id: 'flow-1',
     request: {
-      id: `${id}-req`,
-      method: 'POST',
-      url: `https://example.com/${id}`,
+      id: 'req-1',
+      method: 'GET',
+      url: 'https://api.example.com/users',
       protocol: 'https',
-      host: 'example.com',
-      path: `/${id}`,
-      headers: { 'content-type': 'application/json' },
+      host: 'api.example.com',
+      path: '/users',
+      headers: {},
+      body: undefined,
       bodySize: 0,
       timestamp: Date.now(),
-      graphqlOperationName,
-      graphqlOperationType: graphqlOperationName ? 'query' : undefined,
+      ...(requestOverrides || {}),
     },
     response: {
-      id: `${id}-res`,
-      requestId: `${id}-req`,
+      id: 'res-1',
+      requestId: 'req-1',
       statusCode: 200,
       statusMessage: 'OK',
       headers: { 'content-type': 'application/json' },
-      bodySize: 0,
+      body: '{"message":"hello world"}',
+      bodySize: 25,
       timestamp: Date.now(),
-      duration: 20,
+      duration: 120,
+      ...(responseOverrides || {}),
     },
     state: 'complete',
-    tags: graphqlOperationName ? ['graphql'] : [],
+    tags: [],
     createdAt: Date.now(),
+    ...flowOverrides,
   };
 }
+
+describe('matchesFlowFilter', () => {
+  it('keeps default text search scoped to url and host', () => {
+    const flow = createFlow({
+      request: { body: '{"token":"secret-value"}', bodySize: 24 },
+    });
+
+    expect(matchesFlowFilter(flow, { text: 'secret-value' })).toBe(false);
+  });
+
+  it('can search request and response bodies when enabled', () => {
+    const flow = createFlow({
+      request: { body: '{"token":"secret-value"}', bodySize: 24 },
+    });
+
+    expect(matchesFlowFilter(flow, { text: 'secret-value', searchBodies: true })).toBe(true);
+    expect(matchesFlowFilter(flow, { text: 'hello world', searchBodies: true })).toBe(true);
+  });
+
+  it('skips base64-encoded bodies during body search', () => {
+    const flow = createFlow({
+      response: {
+        body: 'YmluYXJ5LWRhdGE=',
+        bodySize: 16,
+      } as HttpFlow['response'],
+    });
+    (flow.response as any)._isBase64 = true;
+
+    expect(matchesFlowFilter(flow, { text: 'binary-data', searchBodies: true })).toBe(false);
+  });
+});
 
 describe('useTrafficStore GraphQL filtering', () => {
   beforeEach(() => {
@@ -41,8 +82,39 @@ describe('useTrafficStore GraphQL filtering', () => {
 
   it('filters flows by GraphQL operation name', () => {
     useTrafficStore.getState().setFlows([
-      createFlow('viewer', 'GetViewer'),
-      createFlow('health'),
+      createFlow({
+        id: 'viewer',
+        request: {
+          id: 'viewer-req',
+          method: 'POST',
+          url: 'https://example.com/viewer',
+          host: 'example.com',
+          path: '/viewer',
+          headers: { 'content-type': 'application/json' },
+          graphqlOperationName: 'GetViewer',
+          graphqlOperationType: 'query',
+        },
+        response: {
+          id: 'viewer-res',
+          requestId: 'viewer-req',
+          statusCode: 200,
+          statusMessage: 'OK',
+          headers: { 'content-type': 'application/json' },
+          bodySize: 0,
+          duration: 20,
+        },
+        tags: ['graphql'],
+      }),
+      createFlow({
+        id: 'health',
+        request: {
+          id: 'health-req',
+          method: 'GET',
+          url: 'https://example.com/health',
+          host: 'example.com',
+          path: '/health',
+        },
+      }),
     ]);
 
     useTrafficStore.getState().setFilter({ graphqlOperationName: 'viewer' });
