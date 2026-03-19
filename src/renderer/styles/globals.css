@@ -1,20 +1,57 @@
 @import "tailwindcss";
 
-@theme {
-  --color-pb-bg: #1a1b26;
-  --color-pb-surface: #24283b;
-  --color-pb-surface-hover: #2f334d;
-  --color-pb-border: #3b3f5c;
-  --color-pb-text: #c0caf5;
-  --color-pb-text-dim: #565f89;
-  --color-pb-accent: #7aa2f7;
-  --color-pb-success: #9ece6a;
-  --color-pb-warning: #e0af68;
-  --color-pb-error: #f7768e;
-  --color-pb-info: #7dcfff;
+@theme inline {
+  --color-pb-bg: var(--pb-bg);
+  --color-pb-surface: var(--pb-surface);
+  --color-pb-surface-hover: var(--pb-surface-hover);
+  --color-pb-border: var(--pb-border);
+  --color-pb-text: var(--pb-text);
+  --color-pb-text-dim: var(--pb-text-dim);
+  --color-pb-accent: var(--pb-accent);
+  --color-pb-success: var(--pb-success);
+  --color-pb-warning: var(--pb-warning);
+  --color-pb-error: var(--pb-error);
+  --color-pb-info: var(--pb-info);
+}
+
+:root,
+html.dark {
+  --pb-bg: #1a1b26;
+  --pb-surface: #24283b;
+  --pb-surface-hover: #2f334d;
+  --pb-border: #3b3f5c;
+  --pb-text: #c0caf5;
+  --pb-text-dim: #565f89;
+  --pb-accent: #7aa2f7;
+  --pb-success: #9ece6a;
+  --pb-warning: #e0af68;
+  --pb-error: #f7768e;
+  --pb-info: #7dcfff;
+}
+
+html.light {
+  --pb-bg: #f5f7fb;
+  --pb-surface: #ffffff;
+  --pb-surface-hover: #eef2ff;
+  --pb-border: #d7dcea;
+  --pb-text: #1f2937;
+  --pb-text-dim: #6b7280;
+  --pb-accent: #2563eb;
+  --pb-success: #15803d;
+  --pb-warning: #b45309;
+  --pb-error: #dc2626;
+  --pb-info: #0284c7;
 }
 
 @layer base {
+  html {
+    color-scheme: dark;
+  }
+
+  html.light {
+    color-scheme: light;
+  }
+
   body {
     background-color: var(--color-pb-bg);
     color: var(--color-pb-text);
