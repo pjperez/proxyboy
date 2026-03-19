@@ -1,8 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useAppStore } from '../../stores/app';
+import type { TrafficRowColorMode } from '../../utils/traffic-row-colors';
 
 export default function SettingsPanel() {
-  const { proxyPort, theme, noCacheEnabled, setNoCacheEnabled } = useAppStore();
+  const {
+    proxyPort,
+    theme,
+    noCacheEnabled,
+    trafficRowColorMode,
+    setNoCacheEnabled,
+    setTrafficRowColorMode,
+  } = useAppStore();
   const [autoStart, setAutoStart] = useState(() =>
     localStorage.getItem('proxyboy-auto-start') === 'true'
   );
@@ -197,8 +205,27 @@ export default function SettingsPanel() {
       <Section title="Appearance">
         <Row label="Theme">
           <div className="flex gap-2">
-            <ThemeOption label="Dark" active={theme === 'dark'} />
-            <ThemeOption label="Light" disabled />
+            <OptionButton label="Dark" active={theme === 'dark'} />
+            <OptionButton label="Light" disabled />
+          </div>
+        </Row>
+        <Row label="Traffic row colors">
+          <div className="flex gap-2">
+            <OptionButton
+              label="Off"
+              active={trafficRowColorMode === 'off'}
+              onClick={() => setTrafficRowColorMode('off')}
+            />
+            <OptionButton
+              label="By Status"
+              active={trafficRowColorMode === 'status'}
+              onClick={() => setTrafficRowColorMode('status')}
+            />
+            <OptionButton
+              label="By Content Type"
+              active={trafficRowColorMode === 'content-type'}
+              onClick={() => setTrafficRowColorMode('content-type')}
+            />
           </div>
         </Row>
       </Section>
@@ -270,15 +297,28 @@ function CertBadge({ status }: { status: 'checking' | 'installed' | 'not-install
   );
 }
 
-function ThemeOption({ label, active, disabled }: { label: string; active?: boolean; disabled?: boolean }) {
+function OptionButton({
+  label,
+  active,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  active?: boolean;
+  disabled?: boolean;
+  onClick?: () => void;
+}) {
   return (
-    <span
+    <button
+      type="button"
+      onClick={disabled ? undefined : onClick}
+      disabled={disabled}
       className={`px-3 py-1.5 rounded text-sm transition-colors
         ${active ? 'bg-pb-accent/20 text-pb-accent border border-pb-accent/40' : ''}
         ${disabled ? 'text-pb-text-dim border border-pb-border opacity-50 cursor-not-allowed' : ''}
         ${!active && !disabled ? 'text-pb-text border border-pb-border hover:bg-pb-surface-hover cursor-pointer' : ''}`}
     >
       {label}{disabled ? ' (coming soon)' : ''}
-    </span>
+    </button>
   );
 }
