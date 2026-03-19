@@ -4,6 +4,7 @@ import { IPC_CHANNELS } from '../../shared/constants';
 import { ProxyEngine } from '../proxy/engine';
 import { CertificateManager } from '../proxy/certificate';
 import { AgentClient } from '../agent/client';
+import { replayFlowThroughProxy } from '../proxy/replay';
 import { setSystemProxy, clearSystemProxy, isSystemProxyEnabled } from '../utils/windows-proxy';
 import { ProxyState, Rule, HttpFlow } from '../../shared/types';
 import { flowsToHar } from '../utils/har';
@@ -144,6 +145,24 @@ export function registerIpcHandlers(
     try {
       proxyEngine.clearFlows();
       clearAllFlows();
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TRAFFIC_REPEAT, async (_event, id: string) => {
+    try {
+      if (!proxyEngine.isRunning()) {
+        return { success: false, error: 'Start the proxy before replaying a request.' };
+      }
+
+      const flow = proxyEngine.getFlow(id);
+      if (!flow) {
+        return { success: false, error: 'That request is no longer available to replay.' };
+      }
+
+      await replayFlowThroughProxy(flow, proxyEngine.getPort());
       return { success: true };
     } catch (error: any) {
       return { success: false, error: error.message };

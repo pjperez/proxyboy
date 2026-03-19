@@ -1,6 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import RequestView from './RequestView';
 import ResponseView from './ResponseView';
+import CookieView from './CookieView';
 import type { HttpFlow } from '../../../shared/types';
 
 interface Props {
@@ -8,23 +9,36 @@ interface Props {
   onClose: () => void;
 }
 
-type Tab = 'request' | 'response' | 'preview' | 'timing';
+type Tab = 'request' | 'response' | 'cookies' | 'preview' | 'timing';
 
 function isImageFlow(flow: HttpFlow): boolean {
   const ct = flow.response?.headers?.['content-type'];
   return ct ? String(ct).toLowerCase().startsWith('image/') : false;
 }
 
+function hasHeaderValue(value?: string | string[]): boolean {
+  if (!value) return false;
+  return Array.isArray(value) ? value.some((entry) => entry.trim().length > 0) : value.trim().length > 0;
+}
+
 export default function TrafficDetail({ flow, onClose }: Props) {
   const hasPreview = isImageFlow(flow);
+  const hasCookies = hasHeaderValue(flow.request.headers.cookie) || hasHeaderValue(flow.response?.headers['set-cookie']);
   const [tab, setTab] = useState<Tab>(hasPreview ? 'preview' : 'request');
 
   const tabs: { id: Tab; label: string; show: boolean }[] = [
     { id: 'request', label: 'Request', show: true },
     { id: 'response', label: 'Response', show: true },
+    { id: 'cookies', label: 'Cookies', show: hasCookies },
     { id: 'preview', label: '🖼 Preview', show: hasPreview },
     { id: 'timing', label: 'Timing', show: true },
   ];
+
+  useEffect(() => {
+    if ((tab === 'cookies' && !hasCookies) || (tab === 'preview' && !hasPreview)) {
+      setTab(hasPreview ? 'preview' : 'request');
+    }
+  }, [hasCookies, hasPreview, tab]);
 
   const imageDataUrl = useMemo(() => {
     if (!hasPreview || !flow.response?.body) return null;
@@ -78,6 +92,7 @@ export default function TrafficDetail({ flow, onClose }: Props) {
         {tab === 'response' && !flow.response && (
           <div className="text-pb-text-dim text-sm">Waiting for response...</div>
         )}
+        {tab === 'cookies' && <CookieView flow={flow} />}
         {tab === 'preview' && imageDataUrl && (
           <div className="flex flex-col items-center gap-4">
             <div
