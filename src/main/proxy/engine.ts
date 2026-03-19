@@ -4,10 +4,12 @@ import type { IProxy } from 'http-mitm-proxy';
 import { randomUUID } from 'crypto';
 import { gunzipSync, inflateSync, brotliDecompressSync } from 'zlib';
 import { HttpFlow, HttpRequest, HttpResponse } from '../../shared/types';
+import { INTERNAL_REPLAY_HEADER } from '../../shared/constants';
 import { CertificateManager } from './certificate';
 import { Interceptor } from './interceptor';
 import { DnsResolverService } from './dns-resolver';
 import { ProxyEngineOptions } from './types';
+import { applyNoCacheToRequestHeaders, applyNoCacheToResponseHeaders } from './no-cache';
 
 const MAX_FLOWS = 10000;
 const MAX_BODY_SIZE = 2 * 1024 * 1024; // 2 MB
@@ -48,6 +50,7 @@ export class ProxyEngine extends EventEmitter {
   private setupDone = false;
   private origStdoutWrite: typeof process.stdout.write | null = null;
   private origStderrWrite: typeof process.stderr.write | null = null;
+  private noCacheEnabled = false;
 
   constructor(options: ProxyEngineOptions, certManager: CertificateManager) {
     super();
@@ -72,6 +75,14 @@ export class ProxyEngine extends EventEmitter {
 
   getPort(): number {
     return this.options.port;
+  }
+
+  isNoCacheEnabled(): boolean {
+    return this.noCacheEnabled;
+  }
+
+  setNoCacheEnabled(enabled: boolean): void {
+    this.noCacheEnabled = enabled;
   }
 
   setPort(port: number): void {
@@ -198,6 +209,11 @@ export class ProxyEngine extends EventEmitter {
       const flowId = randomUUID();
       const chunks: Buffer[] = [];
       const startTime = Date.now();
+      const replayed = Boolean(ctx.clientToProxyRequest.headers[INTERNAL_REPLAY_HEADER]);
+      if (replayed) {
+        delete ctx.clientToProxyRequest.headers[INTERNAL_REPLAY_HEADER];
+      }
+      const initialTags = replayed ? ['replayed'] : [];
 
       const request: HttpRequest = {
         id: randomUUID(),
@@ -211,11 +227,19 @@ export class ProxyEngine extends EventEmitter {
         timestamp: startTime,
       };
 
+      if (this.noCacheEnabled) {
+        applyNoCacheToRequestHeaders(request.headers);
+        applyNoCacheToRequestHeaders(ctx.clientToProxyRequest.headers as Record<string, string | string[]>);
+      }
+
       // Check map local
       const mapLocalRule = this.interceptor.getMapLocalRule(request.url, request.method);
       if (mapLocalRule) {
         const localResponse = this.interceptor.getMapLocalResponse(mapLocalRule);
         if (localResponse) {
+          if (this.noCacheEnabled) {
+            applyNoCacheToResponseHeaders(localResponse.headers);
+          }
           ctx.proxyToClientResponse.writeHead(localResponse.statusCode, localResponse.headers);
           ctx.proxyToClientResponse.end(localResponse.body);
           
@@ -234,7 +258,7 @@ export class ProxyEngine extends EventEmitter {
               duration: Date.now() - startTime,
             },
             state: 'complete',
-            tags: ['map-local'],
+            tags: [...initialTags, 'map-local'],
             createdAt: startTime,
           };
           this.flows.set(flowId, flow);
@@ -247,7 +271,7 @@ export class ProxyEngine extends EventEmitter {
         id: flowId,
         request,
         state: 'pending',
-        tags: [],
+        tags: [...initialTags],
         createdAt: startTime,
         timing: { start: startTime },
       };
@@ -277,6 +301,9 @@ export class ProxyEngine extends EventEmitter {
 
       ctx.onResponse((ctx: any, cb: () => void) => {
         if (flow.timing) flow.timing.responseStart = Date.now();
+        if (this.noCacheEnabled && ctx.serverToProxyResponse?.headers) {
+          applyNoCacheToResponseHeaders(ctx.serverToProxyResponse.headers as Record<string, string | string[]>);
+        }
         // Response-phase breakpoint
         const responseBreakRule = this.interceptor.shouldBreakpoint(flow, 'response');
         if (responseBreakRule) {

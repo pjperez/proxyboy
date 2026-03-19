@@ -195,9 +195,12 @@ export function getAppSetting(key: string): string | null {
 
 export function setAppSetting(key: string, value: string): void {
   const db = getDatabase();
+  const updatedAt = Date.now();
   db.run(
-    'INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)',
-    [key, value],
+    `INSERT INTO app_settings (key, value, updated_at)
+     VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    [key, value, updatedAt],
   );
   schedulePersist();
 }

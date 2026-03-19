@@ -16,6 +16,8 @@ ProxyBoy is a man-in-the-middle (MITM) HTTP/HTTPS proxy that captures, inspects,
 
 - **Traffic Capture** — Intercept HTTP and HTTPS traffic with automatic SSL certificate generation
 - **Request/Response Inspector** — View headers, bodies (JSON, HTML, XML, images), timing, and metadata
+- **No Cache Toggle** — Strip cache validators and return `Cache-Control: no-store` to force fresh responses
+- **Cookie Inspector** — Parse request cookies and `Set-Cookie` headers into a structured, searchable view
 - **AI Assistant** — Chat panel powered by GitHub Copilot that can search traffic, analyze patterns, create rules, and export data
 - **Breakpoint Rules** — Pause requests/responses mid-flight, inspect them, then forward or drop
 - **Map Local Rules** — Serve local files instead of remote responses for mocking APIs
@@ -23,6 +25,7 @@ ProxyBoy is a man-in-the-middle (MITM) HTTP/HTTPS proxy that captures, inspects,
 - **System Proxy Integration** — Toggle Windows system proxy on/off from the app
 - **HAR Export/Import** — Standard HAR format for sharing captures with other tools
 - **Configurable Columns** — Show/hide columns, sort by any field, timestamps
+- **Body Search** — Include request and response text bodies in traffic filtering when you need deeper search
 - **Copy as cURL** — Right-click any request to copy it as a cURL command
 - **Dark Theme** — Tokyo Night-inspired dark UI
 - **Detachable AI Panel** — Pop the assistant out into its own window

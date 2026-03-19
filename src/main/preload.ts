@@ -9,6 +9,7 @@ const api = {
     stop: () => ipcRenderer.invoke(IPC_CHANNELS.PROXY_STOP),
     getStatus: (): Promise<ProxyState> => ipcRenderer.invoke(IPC_CHANNELS.PROXY_STATUS),
     setSystemProxy: (enabled: boolean) => ipcRenderer.invoke(IPC_CHANNELS.PROXY_SET_SYSTEM, enabled),
+    setNoCache: (enabled: boolean) => ipcRenderer.invoke(IPC_CHANNELS.PROXY_SET_NO_CACHE, enabled),
     installCert: () => ipcRenderer.invoke(IPC_CHANNELS.PROXY_INSTALL_CERT),
     getCertStatus: () => ipcRenderer.invoke(IPC_CHANNELS.PROXY_CERT_STATUS),
   },
@@ -20,6 +21,7 @@ const api = {
     getFlow: (id: string): Promise<HttpFlow | null> =>
       ipcRenderer.invoke(IPC_CHANNELS.TRAFFIC_GET_FLOW, id),
     clear: () => ipcRenderer.invoke(IPC_CHANNELS.TRAFFIC_CLEAR),
+    repeat: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TRAFFIC_REPEAT, id),
     onNewFlow: (callback: (flow: HttpFlow) => void) => {
       const handler = (_event: any, flow: HttpFlow) => callback(flow);
       ipcRenderer.on(IPC_CHANNELS.TRAFFIC_NEW_FLOW, handler);
