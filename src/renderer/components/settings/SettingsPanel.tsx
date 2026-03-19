@@ -135,6 +135,24 @@ export default function SettingsPanel() {
             {installing ? 'Installing…' : certStatus === 'installed' ? 'Installed' : 'Install Certificate'}
           </button>
         </Row>
+        <Row label="Pinning troubleshooting">
+          <div className="max-w-md text-right text-xs text-pb-text-dim">
+            Some apps reject ProxyBoy&apos;s local CA even after it is installed because they pin certificates.
+            <div className="mt-1 space-y-1">
+              <div>Android debug builds: trust a debug network security config or use a debug-only bypass.</div>
+              <div>iOS simulators: prefer debug builds or Frida-style instrumentation when pinning is enforced.</div>
+              <div>Desktop apps: look for developer flags, debug certificates, or test-specific trust overrides.</div>
+            </div>
+            <a
+              href="https://github.com/pjperez/proxyboy#troubleshooting-ssl"
+              target="_blank"
+              rel="noreferrer"
+              className="mt-2 inline-flex text-pb-accent hover:underline"
+            >
+              Read the full SSL troubleshooting guide
+            </a>
+          </div>
+        </Row>
       </Section>
 
       {/* DNS */}
