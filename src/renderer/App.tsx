@@ -110,6 +110,9 @@ function MainApp() {
     const unsubNew = api.traffic.onNewFlow((flow: any) => {
       addFlow(flow);
     });
+    const unsubUpdated = api.traffic.onFlowUpdated((flow: any) => {
+      updateFlow(flow);
+    });
     const unsubComplete = api.traffic.onFlowComplete((flow: any) => {
       updateFlow(flow);
     });
@@ -150,6 +153,7 @@ function MainApp() {
 
     return () => {
       unsubNew();
+      unsubUpdated();
       unsubComplete();
       unsubRuleCreated?.();
       unsubBreakpoint?.();
@@ -510,6 +514,7 @@ function MainApp() {
                 {selectedFlow && (
                   <div className="w-1/2 overflow-hidden">
                     <TrafficDetail
+                      key={selectedFlow.id}
                       flow={selectedFlow}
                       comparisonFlow={comparisonFlow}
                       onClearComparison={clearComparison}

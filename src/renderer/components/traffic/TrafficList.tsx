@@ -46,6 +46,12 @@ function getContentType(headers?: HttpHeaders): string {
   return ct.split(';')[0].split('/').pop() || '';
 }
 
+function getFlowContentType(flow: HttpFlow): string {
+  if (flow.streamKind === 'websocket') return 'WebSocket';
+  if (flow.streamKind === 'sse') return 'SSE';
+  return getContentType(flow.response?.headers);
+}
+
 function formatHeaders(headers: HttpHeaders): string {
   return Object.entries(headers)
     .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
@@ -84,7 +90,7 @@ function getSortValue(flow: HttpFlow, column: ColumnKey): string | number {
         ?? (flow.tags.includes('graphql') ? 'graphql' : '');
     case 'url': return flow.request.path || flow.request.url;
     case 'host': return flow.request.host;
-    case 'type': return getContentType(flow.response?.headers);
+    case 'type': return getFlowContentType(flow);
     case 'size': return flow.response?.bodySize ?? 0;
     case 'time': return flow.response?.duration ?? 0;
   }

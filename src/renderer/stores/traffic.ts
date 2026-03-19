@@ -49,6 +49,17 @@ function getSearchableBody(part?: { body?: Buffer | string }): string {
   return part.body.toLowerCase();
 }
 
+function getSearchableStreamContent(flow: HttpFlow): string {
+  const websocketContent = (flow.websocketFrames ?? [])
+    .filter((frame) => !frame.isBase64)
+    .map((frame) => frame.body.toLowerCase())
+    .join('\n');
+  const sseContent = (flow.sseEvents ?? [])
+    .map((event) => `${event.event || ''}\n${event.data}`.toLowerCase())
+    .join('\n');
+  return `${websocketContent}\n${sseContent}`;
+}
+
 export function matchesFlowFilter(flow: HttpFlow, filter: FilterCriteria): boolean {
   if (filter.text) {
     const text = filter.text.toLowerCase();
@@ -57,7 +68,8 @@ export function matchesFlowFilter(flow: HttpFlow, filter: FilterCriteria): boole
       flow.request.host.toLowerCase().includes(text);
     const matchesBody = filter.searchBodies && (
       getSearchableBody(flow.request).includes(text) ||
-      getSearchableBody(flow.response).includes(text)
+      getSearchableBody(flow.response).includes(text) ||
+      getSearchableStreamContent(flow).includes(text)
     );
 
     if (!matchesUrl && !matchesBody) {
@@ -81,6 +93,12 @@ export function matchesFlowFilter(flow: HttpFlow, filter: FilterCriteria): boole
   }
 
   if (filter.statusCodes?.length) {
+    if (flow.streamKind === 'websocket') {
+      return true;
+    }
+    if (flow.streamKind === 'sse' && !flow.response) {
+      return true;
+    }
     if (!flow.response) return false;
     const matches = filter.statusCodes.some(
       (range) => flow.response!.statusCode >= range.min && flow.response!.statusCode <= range.max

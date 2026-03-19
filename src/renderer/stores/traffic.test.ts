@@ -73,6 +73,56 @@ describe('matchesFlowFilter', () => {
 
     expect(matchesFlowFilter(flow, { text: 'binary-data', searchBodies: true })).toBe(false);
   });
+
+  it('searches websocket and SSE payload text when body search is enabled', () => {
+    const flow = createFlow({
+      streamKind: 'websocket',
+      websocketFrames: [
+        {
+          id: 'frame-1',
+          timestamp: Date.now(),
+          direction: 'client-to-server',
+          frameType: 'message',
+          body: 'hello socket',
+          byteLength: 12,
+        },
+      ],
+      sseEvents: [
+        {
+          id: 'event-1',
+          timestamp: Date.now(),
+          event: 'update',
+          data: 'live payload',
+          byteLength: 12,
+        },
+      ],
+    });
+
+    expect(matchesFlowFilter(flow, { text: 'socket', searchBodies: true })).toBe(true);
+    expect(matchesFlowFilter(flow, { text: 'live payload', searchBodies: true })).toBe(true);
+  });
+
+  it('keeps websocket flows visible when status filters are active', () => {
+    const flow = createFlow({
+      streamKind: 'websocket',
+      response: {
+        statusCode: 101,
+        statusMessage: 'Switching Protocols',
+      },
+    });
+
+    expect(matchesFlowFilter(flow, { statusCodes: [{ label: '2xx', min: 200, max: 299 }] })).toBe(true);
+  });
+
+  it('keeps live SSE flows visible when status filters are active', () => {
+    const flow = createFlow({
+      streamKind: 'sse',
+      response: undefined,
+      state: 'pending',
+    });
+
+    expect(matchesFlowFilter(flow, { statusCodes: [{ label: '2xx', min: 200, max: 299 }] })).toBe(true);
+  });
 });
 
 describe('useTrafficStore GraphQL filtering', () => {
