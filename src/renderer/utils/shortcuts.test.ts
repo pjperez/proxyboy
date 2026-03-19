@@ -11,6 +11,8 @@ describe('SHORTCUT_SECTIONS', () => {
       'Ctrl+E',
       'Ctrl+Shift+A',
       'Ctrl+Shift+C',
+      'Ctrl+Shift+M',
+      'Ctrl+Shift+V',
       'Ctrl+D',
       'Ctrl+F',
       'Ctrl+I',

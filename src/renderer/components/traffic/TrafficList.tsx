@@ -26,6 +26,11 @@ interface Props {
   flows: HttpFlow[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  markedFlowId: string | null;
+  compareTargetFlowId: string | null;
+  onMarkForCompare: (flow: HttpFlow) => void;
+  onCompareWithMarked: (flow: HttpFlow) => void;
+  onClearComparison: () => void;
 }
 
 function getContentType(headers?: HttpHeaders): string {
@@ -135,7 +140,16 @@ function saveVisibleColumns(columns: Set<ColumnKey>) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify([...columns]));
 }
 
-export default function TrafficList({ flows, selectedId, onSelect }: Props) {
+export default function TrafficList({
+  flows,
+  selectedId,
+  onSelect,
+  markedFlowId,
+  compareTargetFlowId,
+  onMarkForCompare,
+  onCompareWithMarked,
+  onClearComparison,
+}: Props) {
   const trafficRowColorMode = useAppStore((state) => state.trafficRowColorMode);
   const [sort, setSort] = useState<SortState>({ column: null, direction: 'asc' });
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -244,7 +258,34 @@ export default function TrafficList({ flows, selectedId, onSelect }: Props) {
   }, []);
 
   const buildMenuItems = useCallback((flow: HttpFlow): ContextMenuItem[] => {
+    const compareItems: ContextMenuItem[] = [];
+
+    if (flow.response) {
+      if (markedFlowId === flow.id || compareTargetFlowId === flow.id) {
+        compareItems.push({
+          label: 'Clear comparison state',
+          icon: '✕',
+          onClick: onClearComparison,
+        });
+      } else {
+        compareItems.push({
+          label: 'Mark response for compare',
+          icon: '🎯',
+          onClick: () => onMarkForCompare(flow),
+        });
+      }
+
+      if (markedFlowId && markedFlowId !== flow.id) {
+        compareItems.push({
+          label: 'Compare with marked',
+          icon: '🔀',
+          onClick: () => onCompareWithMarked(flow),
+        });
+      }
+    }
+
     return [
+      ...compareItems,
       {
         label: 'Block this domain',
         icon: '🛑',
@@ -299,7 +340,7 @@ export default function TrafficList({ flows, selectedId, onSelect }: Props) {
         },
       },
     ];
-  }, [quickAddCaptureRule]);
+  }, [compareTargetFlowId, markedFlowId, onClearComparison, onCompareWithMarked, onMarkForCompare, quickAddCaptureRule]);
 
   if (flows.length === 0) {
     return (
@@ -372,6 +413,8 @@ export default function TrafficList({ flows, selectedId, onSelect }: Props) {
             onContextMenu={handleContextMenu}
             visibleColumns={visibleColumns}
             colorMode={trafficRowColorMode}
+            markedForCompare={flow.id === markedFlowId}
+            comparisonTarget={flow.id === compareTargetFlowId}
             columnKey={columnKey}
           />
         )}

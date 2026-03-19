@@ -76,10 +76,15 @@ function MainApp() {
 
   const flows = useTrafficStore(s => s.flows);
   const filter = useTrafficStore(s => s.filter);
+  const markedFlowId = useTrafficStore(s => s.markedFlowId);
+  const compareTargetFlowId = useTrafficStore(s => s.compareTargetFlowId);
   const setFlows = useTrafficStore(s => s.setFlows);
   const addFlow = useTrafficStore(s => s.addFlow);
   const updateFlow = useTrafficStore(s => s.updateFlow);
   const removeFlow = useTrafficStore(s => s.removeFlow);
+  const setMarkedFlowId = useTrafficStore(s => s.setMarkedFlowId);
+  const setCompareTargetFlowId = useTrafficStore(s => s.setCompareTargetFlowId);
+  const clearComparison = useTrafficStore(s => s.clearComparison);
   const getFilteredFlows = useTrafficStore(s => s.getFilteredFlows);
   const { addRule } = useRulesStore();
   const { proxyRunning, setProxyRunning, setNoCacheEnabled, theme } = useAppStore();
@@ -155,6 +160,17 @@ function MainApp() {
     () => selectedFlowId ? flows.find(f => f.id === selectedFlowId) ?? null : null,
     [flows, selectedFlowId]
   );
+  const markedFlow = useMemo(
+    () => markedFlowId ? flows.find((flow) => flow.id === markedFlowId) ?? null : null,
+    [flows, markedFlowId],
+  );
+  const comparisonFlow = useMemo(() => {
+    if (!selectedFlow || compareTargetFlowId !== selectedFlow.id || !markedFlow || markedFlow.id === selectedFlow.id) {
+      return null;
+    }
+
+    return markedFlow;
+  }, [compareTargetFlowId, markedFlow, selectedFlow]);
 
   useEffect(() => {
     if (selectedFlowId && !flows.some((flow) => flow.id === selectedFlowId)) {
@@ -260,6 +276,36 @@ function MainApp() {
     setSelectedFlowId(nextSelectedFlowId);
   }, [filteredFlows, removeFlow, selectedFlowId, selectedView, showActionError]);
 
+  const handleMarkFlowForCompare = useCallback((flow: typeof flows[number]) => {
+    if (!flow.response) {
+      showActionError('Wait for the response to complete before marking it for comparison.');
+      return;
+    }
+
+    setMarkedFlowId(flow.id);
+    if (compareTargetFlowId === flow.id) {
+      setCompareTargetFlowId(null);
+    }
+  }, [compareTargetFlowId, setCompareTargetFlowId, setMarkedFlowId, showActionError]);
+
+  const handleCompareWithMarked = useCallback((flow: typeof flows[number]) => {
+    if (!flow.response) {
+      showActionError('Wait for the response to complete before comparing it.');
+      return;
+    }
+    if (!markedFlowId) {
+      showActionError('Mark another response first.');
+      return;
+    }
+    if (markedFlowId === flow.id) {
+      showActionError('Choose a different response to compare against the marked one.');
+      return;
+    }
+
+    setSelectedFlowId(flow.id);
+    setCompareTargetFlowId(flow.id);
+  }, [markedFlowId, setCompareTargetFlowId, showActionError]);
+
   const dismissPanels = useCallback((): boolean => {
     if (showShortcutHelp) {
       setShowShortcutHelp(false);
@@ -318,6 +364,22 @@ function MainApp() {
       if (e.ctrlKey && e.shiftKey && key === 'c') {
         e.preventDefault();
         void handleCopySelectedFlowAsCurl();
+        return;
+      }
+
+      if (e.ctrlKey && e.shiftKey && key === 'm') {
+        e.preventDefault();
+        if (selectedView === 'traffic' && selectedFlow) {
+          handleMarkFlowForCompare(selectedFlow);
+        }
+        return;
+      }
+
+      if (e.ctrlKey && e.shiftKey && key === 'v') {
+        e.preventDefault();
+        if (selectedView === 'traffic' && selectedFlow) {
+          handleCompareWithMarked(selectedFlow);
+        }
         return;
       }
 
@@ -396,12 +458,15 @@ function MainApp() {
     filteredFlows,
     focusTrafficFilter,
     handleClearTraffic,
+    handleCompareWithMarked,
     handleCopySelectedFlowAsCurl,
     handleDeleteSelectedFlow,
     handleExportHar,
     handleImportHar,
+    handleMarkFlowForCompare,
     handleProxyToggle,
     handleToggleDetail,
+    selectedFlow,
     selectedFlowId,
     selectedView,
     showShortcutHelp,
@@ -433,12 +498,19 @@ function MainApp() {
                     flows={filteredFlows}
                     selectedId={selectedFlowId}
                     onSelect={setSelectedFlowId}
+                    markedFlowId={markedFlowId}
+                    compareTargetFlowId={compareTargetFlowId}
+                    onMarkForCompare={handleMarkFlowForCompare}
+                    onCompareWithMarked={handleCompareWithMarked}
+                    onClearComparison={clearComparison}
                   />
                 </div>
                 {selectedFlow && (
                   <div className="w-1/2 overflow-hidden">
                     <TrafficDetail
                       flow={selectedFlow}
+                      comparisonFlow={comparisonFlow}
+                      onClearComparison={clearComparison}
                       onClose={() => setSelectedFlowId(null)}
                     />
                   </div>

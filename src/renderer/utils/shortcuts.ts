@@ -25,6 +25,8 @@ export const SHORTCUT_SECTIONS: ShortcutSection[] = [
       { keys: ['Ctrl', 'F'], description: 'Focus the traffic filter' },
       { keys: ['Ctrl', 'D'], description: 'Open or close the selected request detail' },
       { keys: ['Ctrl', 'Shift', 'C'], description: 'Copy the selected request as cURL' },
+      { keys: ['Ctrl', 'Shift', 'M'], description: 'Mark the selected response for comparison' },
+      { keys: ['Ctrl', 'Shift', 'V'], description: 'Compare the selected response with the marked one' },
       { keys: ['Delete'], description: 'Remove the selected completed request' },
       { keys: ['Ctrl', 'K'], description: 'Clear all captured traffic' },
       { keys: ['Arrow Up'], description: 'Select the previous request' },

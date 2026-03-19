@@ -10,6 +10,8 @@ interface Props {
   onContextMenu?: (e: React.MouseEvent, flow: HttpFlow) => void;
   visibleColumns: Set<ColumnKey>;
   colorMode: TrafficRowColorMode;
+  markedForCompare?: boolean;
+  comparisonTarget?: boolean;
   /** Stable string key for memo comparison (avoids Set reference issues) */
   columnKey?: string;
 }
@@ -76,7 +78,16 @@ function getContentType(headers?: Record<string, any>): string {
   return ct.split(';')[0].split('/').pop() || '—';
 }
 
-function TrafficRowInner({ flow, selected, onSelect, onContextMenu, visibleColumns, colorMode }: Props) {
+function TrafficRowInner({
+  flow,
+  selected,
+  onSelect,
+  onContextMenu,
+  visibleColumns,
+  colorMode,
+  markedForCompare = false,
+  comparisonTarget = false,
+}: Props) {
   const pathPart = flow.request.url.replace(/^https?:\/\/[^/]+/, '');
   const v = visibleColumns;
   const accentColor = getTrafficRowAccentColor(flow, colorMode);
@@ -121,6 +132,16 @@ function TrafficRowInner({ flow, selected, onSelect, onContextMenu, visibleColum
       )}
       {v.has('url') && (
         <span className="flex-1 ml-2 flex items-center gap-2 overflow-hidden" title={flow.request.url}>
+          {markedForCompare && (
+            <span className="shrink-0 rounded bg-pb-accent/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-pb-accent">
+              MARKED
+            </span>
+          )}
+          {comparisonTarget && (
+            <span className="shrink-0 rounded bg-pb-warning/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-pb-warning">
+              DIFF
+            </span>
+          )}
           {flow.tags.includes('graphql') && (
             <span className="shrink-0 rounded bg-pb-info/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-pb-info">
               GQL
@@ -167,6 +188,8 @@ const TrafficRow = React.memo(TrafficRowInner, (prev, next) => {
     prev.onSelect === next.onSelect &&
     prev.onContextMenu === next.onContextMenu &&
     prev.colorMode === next.colorMode &&
+    prev.markedForCompare === next.markedForCompare &&
+    prev.comparisonTarget === next.comparisonTarget &&
     prev.columnKey === next.columnKey
   );
 });
