@@ -6,11 +6,12 @@ import { CertificateManager } from '../proxy/certificate';
 import { AgentClient } from '../agent/client';
 import { replayFlowThroughProxy } from '../proxy/replay';
 import { setSystemProxy, clearSystemProxy, isSystemProxyEnabled } from '../utils/windows-proxy';
-import { ProxyState, Rule, HttpFlow, CaptureFilterMode } from '../../shared/types';
+import { ProxyState, Rule, HttpFlow, CaptureFilterMode, ScriptRule, ScriptTestResult } from '../../shared/types';
 import { normalizeThrottleSettings, type ThrottleSettings } from '../../shared/throttle';
 import { flowsToHar } from '../utils/har';
 import { randomUUID } from 'crypto';
 import { annotateGraphQLRequest } from '../../shared/graphql';
+import { executeScriptRule } from '../scripting/runner';
 import {
   saveFlow,
   clearAllFlows,
@@ -327,6 +328,70 @@ export function registerIpcHandlers(
         return rule;
       }
       return null;
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SCRIPT_TEST, (_event, data: { rule: Omit<ScriptRule, 'id' | 'createdAt' | 'updatedAt'>; flowId: string }): ScriptTestResult => {
+    try {
+      const flow = proxyEngine.getFlow(data.flowId);
+      if (!flow) {
+        return { success: false, error: 'Select a captured flow before testing a script.' };
+      }
+
+      const rule: ScriptRule = {
+        ...data.rule,
+        id: randomUUID(),
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+
+      let request = {
+        ...flow.request,
+        headers: JSON.parse(JSON.stringify(flow.request.headers)),
+      };
+      let response = flow.response
+        ? {
+            ...flow.response,
+            headers: JSON.parse(JSON.stringify(flow.response.headers)),
+          }
+        : undefined;
+      const notes: string[] = [];
+      let blocked = false;
+
+      if (rule.phase === 'request' || rule.phase === 'both') {
+        const result = executeScriptRule(rule, request, undefined, true);
+        request = result.request;
+        blocked = result.blocked;
+        notes.push(...result.notes);
+      }
+
+      if (!blocked && (rule.phase === 'response' || rule.phase === 'both') && response) {
+        const result = executeScriptRule(rule, request, response, false);
+        request = result.request;
+        response = result.response;
+        notes.push(...result.notes);
+      }
+
+      const preview = sanitizeFlow({
+        id: flow.id,
+        request,
+        response,
+        state: blocked ? 'blocked' : flow.state,
+        tags: [...flow.tags],
+        notes: notes.join('\n') || flow.notes,
+        createdAt: flow.createdAt,
+        timing: flow.timing,
+      });
+
+      return {
+        success: true,
+        blocked,
+        notes,
+        request: preview.request,
+        response: preview.response,
+      };
     } catch (error: any) {
       return { success: false, error: error.message };
     }

@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../shared/constants';
-import type { ProxyState, HttpFlow, Rule, FilterCriteria, CaptureFilterMode } from '../shared/types';
+import type { ProxyState, HttpFlow, Rule, FilterCriteria, CaptureFilterMode, ScriptRule, ScriptTestResult } from '../shared/types';
 import type { ThrottleSettings } from '../shared/throttle';
 
 const api = {
@@ -54,6 +54,11 @@ const api = {
       ipcRenderer.on(IPC_CHANNELS.RULES_CREATED, handler);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.RULES_CREATED, handler);
     },
+  },
+
+  scripts: {
+    test: (rule: Omit<ScriptRule, 'id' | 'createdAt' | 'updatedAt'>, flowId: string): Promise<ScriptTestResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCRIPT_TEST, { rule, flowId }),
   },
 
   // Breakpoint

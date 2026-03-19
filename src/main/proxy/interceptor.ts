@@ -1,4 +1,4 @@
-import { HttpFlow, BreakpointRule, MapLocalRule, Rule, AllowListRule, BlockListRule, CaptureFilterMode } from '../../shared/types';
+import { HttpFlow, BreakpointRule, MapLocalRule, Rule, AllowListRule, BlockListRule, CaptureFilterMode, ScriptRule } from '../../shared/types';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -8,6 +8,8 @@ export class Interceptor {
   private mapLocalRules: MapLocalRule[] = [];
   private allowListRules: AllowListRule[] = [];
   private blockListRules: BlockListRule[] = [];
+  private requestScriptRules: ScriptRule[] = [];
+  private responseScriptRules: ScriptRule[] = [];
   private captureMode: CaptureFilterMode = 'capture-all';
   private regexCache: Map<string, RegExp> = new Map();
   private pausedFlows: Map<string, {
@@ -20,6 +22,12 @@ export class Interceptor {
     this.mapLocalRules = rules.filter((r): r is MapLocalRule => r.type === 'map-local' && r.enabled);
     this.allowListRules = rules.filter((r): r is AllowListRule => r.type === 'allow-list' && r.enabled);
     this.blockListRules = rules.filter((r): r is BlockListRule => r.type === 'block-list' && r.enabled);
+    this.requestScriptRules = rules
+      .filter((r): r is ScriptRule => r.type === 'script' && r.enabled)
+      .filter((r) => r.phase === 'request' || r.phase === 'both');
+    this.responseScriptRules = rules
+      .filter((r): r is ScriptRule => r.type === 'script' && r.enabled)
+      .filter((r) => r.phase === 'response' || r.phase === 'both');
     this.regexCache.clear();
   }
 
@@ -132,6 +140,11 @@ export class Interceptor {
       return rule;
     }
     return null;
+  }
+
+  getScriptRules(url: string, method: string, phase: 'request' | 'response'): ScriptRule[] {
+    const source = phase === 'request' ? this.requestScriptRules : this.responseScriptRules;
+    return source.filter((rule) => this.matchesRule(rule, url, method));
   }
 
   getMapLocalResponse(rule: MapLocalRule): { statusCode: number; headers: Record<string, string>; body: Buffer } | null {
