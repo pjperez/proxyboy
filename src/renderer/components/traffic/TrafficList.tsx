@@ -7,7 +7,7 @@ import { flowToCurl } from '../../utils/curl';
 import { useRulesStore } from '../../stores/rules';
 import type { HttpFlow, HttpHeaders } from '../../../shared/types';
 
-export type ColumnKey = 'timestamp' | 'method' | 'status' | 'url' | 'host' | 'type' | 'size' | 'time';
+export type ColumnKey = 'timestamp' | 'method' | 'status' | 'graphql' | 'url' | 'host' | 'type' | 'size' | 'time';
 type SortDirection = 'asc' | 'desc';
 
 interface SortState {
@@ -72,6 +72,10 @@ function getSortValue(flow: HttpFlow, column: ColumnKey): string | number {
     case 'timestamp': return flow.createdAt || flow.request.timestamp;
     case 'method': return flow.request.method;
     case 'status': return flow.response?.statusCode ?? 0;
+    case 'graphql':
+      return flow.request.graphqlOperationName
+        ?? flow.request.graphqlOperationType
+        ?? (flow.tags.includes('graphql') ? 'graphql' : '');
     case 'url': return flow.request.path || flow.request.url;
     case 'host': return flow.request.host;
     case 'type': return getContentType(flow.response?.headers);
@@ -104,6 +108,7 @@ const ALL_COLUMNS: ColumnDef[] = [
   { key: 'timestamp', label: 'Start', className: 'w-20' },
   { key: 'method', label: 'Method', className: 'w-16' },
   { key: 'status', label: 'Status', className: 'w-12' },
+  { key: 'graphql', label: 'GraphQL', className: 'w-32 truncate' },
   { key: 'host', label: 'Host', className: 'w-40 truncate' },
   { key: 'url', label: 'Path', className: 'flex-1 ml-2' },
   { key: 'type', label: 'Type', className: 'w-24 text-right' },

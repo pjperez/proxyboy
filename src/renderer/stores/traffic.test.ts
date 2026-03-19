@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { matchesFlowFilter, useTrafficStore } from './traffic';
 import type { HttpFlow } from '../../shared/types';
-import { matchesFlowFilter } from './traffic';
 
 interface FlowOverrides extends Omit<Partial<HttpFlow>, 'request' | 'response'> {
   request?: Partial<HttpFlow['request']>;
@@ -72,5 +72,53 @@ describe('matchesFlowFilter', () => {
     (flow.response as any)._isBase64 = true;
 
     expect(matchesFlowFilter(flow, { text: 'binary-data', searchBodies: true })).toBe(false);
+  });
+});
+
+describe('useTrafficStore GraphQL filtering', () => {
+  beforeEach(() => {
+    useTrafficStore.setState({ flows: [], filter: {} });
+  });
+
+  it('filters flows by GraphQL operation name', () => {
+    useTrafficStore.getState().setFlows([
+      createFlow({
+        id: 'viewer',
+        request: {
+          id: 'viewer-req',
+          method: 'POST',
+          url: 'https://example.com/viewer',
+          host: 'example.com',
+          path: '/viewer',
+          headers: { 'content-type': 'application/json' },
+          graphqlOperationName: 'GetViewer',
+          graphqlOperationType: 'query',
+        },
+        response: {
+          id: 'viewer-res',
+          requestId: 'viewer-req',
+          statusCode: 200,
+          statusMessage: 'OK',
+          headers: { 'content-type': 'application/json' },
+          bodySize: 0,
+          duration: 20,
+        },
+        tags: ['graphql'],
+      }),
+      createFlow({
+        id: 'health',
+        request: {
+          id: 'health-req',
+          method: 'GET',
+          url: 'https://example.com/health',
+          host: 'example.com',
+          path: '/health',
+        },
+      }),
+    ]);
+
+    useTrafficStore.getState().setFilter({ graphqlOperationName: 'viewer' });
+
+    expect(useTrafficStore.getState().getFilteredFlows().map((flow) => flow.id)).toEqual(['viewer']);
   });
 });

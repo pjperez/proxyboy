@@ -48,6 +48,19 @@ function formatTimestamp(ts: number): string {
   return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
 }
 
+function formatGraphQLOperation(flow: HttpFlow): string {
+  if (flow.request.graphqlOperationName) {
+    return flow.request.graphqlOperationName;
+  }
+  if (flow.request.graphqlOperationType) {
+    return `${flow.request.graphqlOperationType} (anonymous)`;
+  }
+  if (flow.tags.includes('graphql')) {
+    return 'anonymous';
+  }
+  return '—';
+}
+
 function getContentType(headers?: Record<string, any>): string {
   if (!headers) return '—';
   const ct = headers['content-type'] || '';
@@ -92,19 +105,36 @@ function TrafficRowInner({ flow, selected, onSelect, onContextMenu, visibleColum
           )}
         </span>
       )}
+      {v.has('graphql') && (
+        <span className={`w-32 truncate ${flow.request.graphqlOperationType ? 'text-pb-info' : 'text-pb-text-dim'}`}>
+          {formatGraphQLOperation(flow)}
+        </span>
+      )}
       {v.has('host') && (
         <span className="w-40 truncate text-pb-text-dim" title={flow.request.host}>
           {flow.request.host}
         </span>
       )}
       {v.has('url') && (
-        <span className="flex-1 ml-2 truncate text-pb-text" title={flow.request.url}>
-          {v.has('host') ? pathPart : (
-            <>
-              <span className="text-pb-text-dim">{flow.request.host}</span>
-              {pathPart}
-            </>
+        <span className="flex-1 ml-2 flex items-center gap-2 overflow-hidden" title={flow.request.url}>
+          {flow.tags.includes('graphql') && (
+            <span className="shrink-0 rounded bg-pb-info/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-pb-info">
+              GQL
+            </span>
           )}
+          {flow.request.graphqlOperationName && (
+            <span className="shrink-0 max-w-32 truncate text-pb-info" title={flow.request.graphqlOperationName}>
+              {flow.request.graphqlOperationName}
+            </span>
+          )}
+          <span className="truncate text-pb-text">
+            {v.has('host') ? pathPart : (
+              <>
+                <span className="text-pb-text-dim">{flow.request.host}</span>
+                {pathPart}
+              </>
+            )}
+          </span>
         </span>
       )}
       {v.has('type') && (

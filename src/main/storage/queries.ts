@@ -1,5 +1,6 @@
 import { getDatabase, schedulePersist } from './database';
 import { FlowTiming, HttpFlow, HttpRequest, HttpResponse, Rule, StoredBody } from '../../shared/types';
+import { annotateGraphQLRequest } from '../../shared/graphql';
 
 function isProbablyTextBuffer(buf: Buffer): boolean {
   const sample = buf.subarray(0, Math.min(512, buf.length));
@@ -41,15 +42,21 @@ export function saveFlow(flow: HttpFlow): void {
   );
 
   db.run(
-    `INSERT OR REPLACE INTO requests (id, flow_id, method, url, protocol, host, path, headers, body, body_encoding, body_size, timestamp)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO requests (
+       id, flow_id, method, url, protocol, host, path, headers,
+       body, body_encoding, body_size, graphql_operation_type, graphql_operation_name, timestamp
+     )
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       flow.request.id, flow.id, flow.request.method, flow.request.url,
       flow.request.protocol, flow.request.host, flow.request.path,
       JSON.stringify(flow.request.headers),
       requestBody?.data || null,
       requestBody?.encoding || null,
-      flow.request.bodySize, flow.request.timestamp,
+      flow.request.bodySize,
+      flow.request.graphqlOperationType || null,
+      flow.request.graphqlOperationName || null,
+      flow.request.timestamp,
     ],
   );
 
@@ -89,7 +96,9 @@ export function getFlows(limit = 1000, offset = 0): HttpFlow[] {
   return queryFlows(`
     SELECT f.id, f.state, f.tags, f.notes, f.created_at, f.timing,
            r.id as req_id, r.method, r.url, r.protocol, r.host, r.path,
-           r.headers as req_headers, r.body as req_body, r.body_encoding as req_body_encoding, r.body_size as req_body_size, r.timestamp as req_timestamp,
+           r.headers as req_headers, r.body as req_body, r.body_encoding as req_body_encoding, r.body_size as req_body_size,
+           r.graphql_operation_type as req_graphql_operation_type, r.graphql_operation_name as req_graphql_operation_name,
+           r.timestamp as req_timestamp,
            res.id as res_id, res.status_code, res.status_message,
            res.headers as res_headers, res.body as res_body, res.body_encoding as res_body_encoding, res.body_size as res_body_size,
            res.timestamp as res_timestamp, res.duration
@@ -106,26 +115,31 @@ export function searchFlows(query: string): HttpFlow[] {
   return queryFlows(`
     SELECT f.id, f.state, f.tags, f.notes, f.created_at, f.timing,
            r.id as req_id, r.method, r.url, r.protocol, r.host, r.path,
-           r.headers as req_headers, r.body as req_body, r.body_encoding as req_body_encoding, r.body_size as req_body_size, r.timestamp as req_timestamp,
+           r.headers as req_headers, r.body as req_body, r.body_encoding as req_body_encoding, r.body_size as req_body_size,
+           r.graphql_operation_type as req_graphql_operation_type, r.graphql_operation_name as req_graphql_operation_name,
+           r.timestamp as req_timestamp,
            res.id as res_id, res.status_code, res.status_message,
            res.headers as res_headers, res.body as res_body, res.body_encoding as res_body_encoding, res.body_size as res_body_size,
            res.timestamp as res_timestamp, res.duration
-    FROM flows f
-    JOIN requests r ON r.flow_id = f.id
-    LEFT JOIN responses res ON res.flow_id = f.id
-    WHERE r.url LIKE ?
+     FROM flows f
+     JOIN requests r ON r.flow_id = f.id
+     LEFT JOIN responses res ON res.flow_id = f.id
+     WHERE r.url LIKE ?
+       OR COALESCE(r.graphql_operation_name, '') LIKE ?
        OR (r.body LIKE ? AND COALESCE(r.body_encoding, 'utf8') != 'base64')
        OR (res.body LIKE ? AND COALESCE(res.body_encoding, 'utf8') != 'base64')
-    ORDER BY f.created_at DESC
-    LIMIT 500
-  `, [pattern, pattern, pattern]);
+     ORDER BY f.created_at DESC
+     LIMIT 500
+  `, [pattern, pattern, pattern, pattern]);
 }
 
 export function getErrorFlows(): HttpFlow[] {
   return queryFlows(`
     SELECT f.id, f.state, f.tags, f.notes, f.created_at, f.timing,
            r.id as req_id, r.method, r.url, r.protocol, r.host, r.path,
-           r.headers as req_headers, r.body as req_body, r.body_encoding as req_body_encoding, r.body_size as req_body_size, r.timestamp as req_timestamp,
+           r.headers as req_headers, r.body as req_body, r.body_encoding as req_body_encoding, r.body_size as req_body_size,
+           r.graphql_operation_type as req_graphql_operation_type, r.graphql_operation_name as req_graphql_operation_name,
+           r.timestamp as req_timestamp,
            res.id as res_id, res.status_code, res.status_message,
            res.headers as res_headers, res.body as res_body, res.body_encoding as res_body_encoding, res.body_size as res_body_size,
            res.timestamp as res_timestamp, res.duration
@@ -223,6 +237,8 @@ function rowToFlow(row: any): HttpFlow {
     body: decodeBody(row.req_body as string | undefined, row.req_body_encoding as string | undefined),
     bodySize: row.req_body_size || 0,
     timestamp: row.req_timestamp,
+    graphqlOperationType: row.req_graphql_operation_type ? String(row.req_graphql_operation_type) as HttpRequest['graphqlOperationType'] : undefined,
+    graphqlOperationName: row.req_graphql_operation_name ? String(row.req_graphql_operation_name) : undefined,
   };
 
   let response: HttpResponse | undefined;
@@ -240,12 +256,20 @@ function rowToFlow(row: any): HttpFlow {
     };
   }
 
+  const tags = JSON.parse(row.tags || '[]');
+  if ((request.graphqlOperationType || request.graphqlOperationName) && !tags.includes('graphql')) {
+    tags.push('graphql');
+  }
+  if (!request.graphqlOperationType && !request.graphqlOperationName) {
+    annotateGraphQLRequest(request, tags);
+  }
+
   return {
     id: row.id,
     request,
     response,
     state: row.state,
-    tags: JSON.parse(row.tags || '[]'),
+    tags,
     notes: row.notes || undefined,
     createdAt: row.created_at,
     timing: row.timing ? JSON.parse(row.timing as string) as FlowTiming : undefined,

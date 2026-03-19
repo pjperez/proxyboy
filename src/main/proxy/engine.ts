@@ -9,6 +9,7 @@ import { CertificateManager } from './certificate';
 import { Interceptor } from './interceptor';
 import { DnsResolverService } from './dns-resolver';
 import { ProxyEngineOptions } from './types';
+import { annotateGraphQLRequest } from '../../shared/graphql';
 import { applyNoCacheToRequestHeaders, applyNoCacheToResponseHeaders } from './no-cache';
 
 const MAX_FLOWS = 10000;
@@ -295,6 +296,7 @@ export class ProxyEngine extends EventEmitter {
           flow.request.body = body;
           flow.request.bodySize = body.length;
         }
+        annotateGraphQLRequest(flow.request, flow.tags);
         if (flow.timing) flow.timing.requestEnd = Date.now();
         callback();
       });

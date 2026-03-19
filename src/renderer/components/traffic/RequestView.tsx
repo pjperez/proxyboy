@@ -16,6 +16,16 @@ export default function RequestView({ request }: Props) {
           <div><span className="text-pb-text-dim">URL: </span><span className="font-mono">{request.url}</span></div>
           <div><span className="text-pb-text-dim">Method: </span><span className="font-mono">{request.method}</span></div>
           <div><span className="text-pb-text-dim">Protocol: </span><span className="font-mono">{request.protocol.toUpperCase()}</span></div>
+          {request.graphqlOperationType && (
+            <div>
+              <span className="text-pb-text-dim">GraphQL: </span>
+              <span className="font-mono text-pb-info">
+                {request.graphqlOperationName
+                  ? `${request.graphqlOperationType} ${request.graphqlOperationName}`
+                  : `${request.graphqlOperationType} (anonymous)`}
+              </span>
+            </div>
+          )}
         </div>
       </section>
 
@@ -40,7 +50,11 @@ export default function RequestView({ request }: Props) {
           <h3 className="text-xs font-semibold text-pb-text-dim uppercase mb-2">
             Body ({request.bodySize} bytes)
           </h3>
-          <BodyViewer body={String(request.body)} contentType={String(request.headers['content-type'] || '')} />
+          <BodyViewer
+            body={String(request.body)}
+            contentType={String(request.headers['content-type'] || '')}
+            detectGraphQL={true}
+          />
         </section>
       )}
     </div>

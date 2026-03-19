@@ -1,9 +1,11 @@
 import React, { useMemo, useState } from 'react';
+import { parseGraphQLRequest } from '../../../shared/graphql';
 
 interface Props {
   body: string;
   contentType: string;
   isBase64?: boolean;
+  detectGraphQL?: boolean;
 }
 
 function formatSize(bytes: number): string {
@@ -36,7 +38,7 @@ function base64Decode(b64: string): string | null {
   }
 }
 
-export default function BodyViewer({ body, contentType, isBase64 }: Props) {
+export default function BodyViewer({ body, contentType, isBase64, detectGraphQL = false }: Props) {
   const isImage = contentType.startsWith('image/');
   const [showDecoded, setShowDecoded] = useState(true);
 
@@ -47,6 +49,10 @@ export default function BodyViewer({ body, contentType, isBase64 }: Props) {
   }, [body, isBase64, isImage, showDecoded]);
 
   const displayBody = (isBase64 && !isImage) ? (decoded ?? `[Binary data, ${formatSize(body.length * 0.75)} estimated]`) : body;
+  const graphqlRequest = useMemo(() => {
+    if (isImage || isBase64 || !detectGraphQL) return null;
+    return parseGraphQLRequest(displayBody, contentType);
+  }, [contentType, detectGraphQL, displayBody, isBase64, isImage]);
 
   const formatted = useMemo(() => {
     if (isImage) return displayBody;
@@ -81,6 +87,42 @@ export default function BodyViewer({ body, contentType, isBase64 }: Props) {
         </div>
         <div className="text-xs text-pb-text-dim">
           {contentType} • {formatSize(body.length)} (base64)
+        </div>
+      </div>
+    );
+  }
+
+  if (graphqlRequest) {
+    return (
+      <div className="bg-pb-bg rounded border border-pb-border overflow-hidden">
+        <div className="flex items-center gap-2 px-3 py-2 border-b border-pb-border bg-pb-surface text-xs">
+          <span className="rounded bg-pb-info/15 px-1.5 py-0.5 font-semibold uppercase tracking-wide text-pb-info">
+            GraphQL
+          </span>
+          <span className="text-pb-text">
+            {graphqlRequest.operationName || 'Anonymous operation'}
+          </span>
+          {graphqlRequest.operationType && (
+            <span className="text-pb-text-dim">
+              {graphqlRequest.operationType}
+            </span>
+          )}
+        </div>
+        <div className="space-y-3 p-3">
+          <div>
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-pb-text-dim">Query</div>
+            <pre className="whitespace-pre-wrap break-all rounded border border-pb-border bg-pb-surface p-3 text-xs font-mono text-pb-info">
+              {graphqlRequest.query}
+            </pre>
+          </div>
+          {graphqlRequest.variables !== undefined && (
+            <div>
+              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-pb-text-dim">Variables</div>
+              <pre className="whitespace-pre-wrap break-all rounded border border-pb-border bg-pb-surface p-3 text-xs font-mono text-pb-text">
+                {JSON.stringify(graphqlRequest.variables, null, 2)}
+              </pre>
+            </div>
+          )}
         </div>
       </div>
     );

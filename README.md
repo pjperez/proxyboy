@@ -16,6 +16,7 @@ ProxyBoy is a man-in-the-middle (MITM) HTTP/HTTPS proxy that captures, inspects,
 
 - **Traffic Capture** — Intercept HTTP and HTTPS traffic with automatic SSL certificate generation
 - **Request/Response Inspector** — View headers, bodies (JSON, HTML, XML, images), timing, and metadata
+- **GraphQL Awareness** — Detect GraphQL operations, show operation names, and filter traffic by operation
 - **No Cache Toggle** — Strip cache validators and return `Cache-Control: no-store` to force fresh responses
 - **Cookie Inspector** — Parse request cookies and `Set-Cookie` headers into a structured, searchable view
 - **AI Assistant** — Chat panel powered by GitHub Copilot that can search traffic, analyze patterns, create rules, and export data
