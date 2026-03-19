@@ -16,6 +16,7 @@ import {
   getRules,
   getFlows as getStoredFlows,
   deleteRule as dbDeleteRule,
+  deleteFlow as deleteStoredFlow,
   getAppSetting,
   setAppSetting,
 } from '../storage/queries';
@@ -145,6 +146,25 @@ export function registerIpcHandlers(
     try {
       proxyEngine.clearFlows();
       clearAllFlows();
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.TRAFFIC_DELETE, (_event, id: string) => {
+    try {
+      const flow = proxyEngine.getFlow(id);
+      if (!flow) {
+        return { success: false, error: 'That request is no longer available.' };
+      }
+
+      if (!['complete', 'error', 'blocked'].includes(flow.state)) {
+        return { success: false, error: 'Only completed requests can be removed from the list.' };
+      }
+
+      proxyEngine.deleteFlow(id);
+      deleteStoredFlow(id);
       return { success: true };
     } catch (error: any) {
       return { success: false, error: error.message };

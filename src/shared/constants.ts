@@ -16,6 +16,7 @@ export const IPC_CHANNELS = {
   TRAFFIC_CLEAR: 'traffic:clear',
   TRAFFIC_GET_FLOWS: 'traffic:get-flows',
   TRAFFIC_GET_FLOW: 'traffic:get-flow',
+  TRAFFIC_DELETE: 'traffic:delete',
   TRAFFIC_REPEAT: 'traffic:repeat',
   
   // Rules

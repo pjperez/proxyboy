@@ -63,6 +63,7 @@ export default function TrafficDetail({ flow, onClose }: Props) {
         </div>
         <button
           onClick={onClose}
+          title="Close detail (Esc or Ctrl+D)"
           className="text-pb-text-dim hover:text-pb-text text-lg px-1"
         >
           ✕

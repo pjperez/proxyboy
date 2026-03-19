@@ -9,6 +9,7 @@ interface TrafficState {
   setFlows: (flows: HttpFlow[]) => void;
   addFlow: (flow: HttpFlow) => void;
   updateFlow: (flow: HttpFlow) => void;
+  removeFlow: (id: string) => void;
   clearFlows: () => void;
   setFilter: (filter: FilterCriteria) => void;
   getFilteredFlows: () => HttpFlow[];
@@ -100,6 +101,11 @@ export const useTrafficStore = create<TrafficState>((set, get) => ({
       next[index] = flow;
       return { flows: next };
     }),
+
+  removeFlow: (id) =>
+    set((state) => ({
+      flows: state.flows.filter((flow) => flow.id !== id),
+    })),
 
   clearFlows: () => set({ flows: [] }),
 

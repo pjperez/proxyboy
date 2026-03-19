@@ -113,6 +113,10 @@ export class ProxyEngine extends EventEmitter {
     return this.flows.get(id);
   }
 
+  deleteFlow(id: string): boolean {
+    return this.flows.delete(id);
+  }
+
   clearFlows(): void {
     this.flows.clear();
   }
