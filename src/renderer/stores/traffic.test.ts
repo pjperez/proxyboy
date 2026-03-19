@@ -77,7 +77,7 @@ describe('matchesFlowFilter', () => {
 
 describe('useTrafficStore GraphQL filtering', () => {
   beforeEach(() => {
-    useTrafficStore.setState({ flows: [], filter: {} });
+    useTrafficStore.setState({ flows: [], filter: {}, markedFlowId: null, compareTargetFlowId: null });
   });
 
   it('filters flows by GraphQL operation name', () => {
@@ -120,5 +120,33 @@ describe('useTrafficStore GraphQL filtering', () => {
     useTrafficStore.getState().setFilter({ graphqlOperationName: 'viewer' });
 
     expect(useTrafficStore.getState().getFilteredFlows().map((flow) => flow.id)).toEqual(['viewer']);
+  });
+});
+
+describe('useTrafficStore comparison state', () => {
+  beforeEach(() => {
+    useTrafficStore.setState({ flows: [], filter: {}, markedFlowId: null, compareTargetFlowId: null });
+  });
+
+  it('tracks marked and comparison flow ids', () => {
+    useTrafficStore.getState().setMarkedFlowId('a');
+    useTrafficStore.getState().setCompareTargetFlowId('b');
+
+    expect(useTrafficStore.getState().markedFlowId).toBe('a');
+    expect(useTrafficStore.getState().compareTargetFlowId).toBe('b');
+  });
+
+  it('clears comparison ids when flows are removed', () => {
+    useTrafficStore.getState().setFlows([
+      createFlow({ id: 'a', request: { id: 'a-req' }, response: { id: 'a-res', requestId: 'a-req' } }),
+      createFlow({ id: 'b', request: { id: 'b-req' }, response: { id: 'b-res', requestId: 'b-req' } }),
+    ]);
+    useTrafficStore.getState().setMarkedFlowId('a');
+    useTrafficStore.getState().setCompareTargetFlowId('b');
+
+    useTrafficStore.getState().removeFlow('a');
+
+    expect(useTrafficStore.getState().markedFlowId).toBeNull();
+    expect(useTrafficStore.getState().compareTargetFlowId).toBeNull();
   });
 });

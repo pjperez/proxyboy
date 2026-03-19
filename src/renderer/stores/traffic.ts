@@ -6,13 +6,39 @@ const MAX_RENDERER_FLOWS = 5000;
 interface TrafficState {
   flows: HttpFlow[];
   filter: FilterCriteria;
+  markedFlowId: string | null;
+  compareTargetFlowId: string | null;
   setFlows: (flows: HttpFlow[]) => void;
   addFlow: (flow: HttpFlow) => void;
   updateFlow: (flow: HttpFlow) => void;
   removeFlow: (id: string) => void;
   clearFlows: () => void;
   setFilter: (filter: FilterCriteria) => void;
+  setMarkedFlowId: (id: string | null) => void;
+  setCompareTargetFlowId: (id: string | null) => void;
+  clearComparison: () => void;
   getFilteredFlows: () => HttpFlow[];
+}
+
+function reconcileComparisonState(
+  flows: HttpFlow[],
+  markedFlowId: string | null,
+  compareTargetFlowId: string | null,
+): Pick<TrafficState, 'markedFlowId' | 'compareTargetFlowId'> {
+  const flowIds = new Set(flows.map((flow) => flow.id));
+  const nextMarkedFlowId = markedFlowId && flowIds.has(markedFlowId) ? markedFlowId : null;
+  const nextCompareTargetFlowId =
+    nextMarkedFlowId &&
+    compareTargetFlowId &&
+    flowIds.has(compareTargetFlowId) &&
+    compareTargetFlowId !== nextMarkedFlowId
+      ? compareTargetFlowId
+      : null;
+
+  return {
+    markedFlowId: nextMarkedFlowId,
+    compareTargetFlowId: nextCompareTargetFlowId,
+  };
 }
 
 function getSearchableBody(part?: { body?: Buffer | string }): string {
@@ -86,16 +112,32 @@ export function matchesFlowFilter(flow: HttpFlow, filter: FilterCriteria): boole
 export const useTrafficStore = create<TrafficState>((set, get) => ({
   flows: [],
   filter: {},
+  markedFlowId: null,
+  compareTargetFlowId: null,
 
-  setFlows: (flows) => set({ flows }),
+  setFlows: (flows) =>
+    set((state) => ({
+      flows,
+      ...reconcileComparisonState(flows, state.markedFlowId, state.compareTargetFlowId),
+    })),
 
   addFlow: (flow) =>
     set((state) => {
       const next = [...state.flows, flow];
+      const flows = next.length > MAX_RENDERER_FLOWS
+        ? next.slice(Math.floor(MAX_RENDERER_FLOWS * 0.2))
+        : next;
+
       if (next.length > MAX_RENDERER_FLOWS) {
-        return { flows: next.slice(Math.floor(MAX_RENDERER_FLOWS * 0.2)) };
+        return {
+          flows,
+          ...reconcileComparisonState(flows, state.markedFlowId, state.compareTargetFlowId),
+        };
       }
-      return { flows: next };
+      return {
+        flows,
+        ...reconcileComparisonState(flows, state.markedFlowId, state.compareTargetFlowId),
+      };
     }),
 
   updateFlow: (flow) =>
@@ -110,13 +152,36 @@ export const useTrafficStore = create<TrafficState>((set, get) => ({
     }),
 
   removeFlow: (id) =>
-    set((state) => ({
-      flows: state.flows.filter((flow) => flow.id !== id),
-    })),
+    set((state) => {
+      const flows = state.flows.filter((flow) => flow.id !== id);
+      return {
+        flows,
+        ...reconcileComparisonState(flows, state.markedFlowId, state.compareTargetFlowId),
+      };
+    }),
 
-  clearFlows: () => set({ flows: [] }),
+  clearFlows: () => set({ flows: [], markedFlowId: null, compareTargetFlowId: null }),
 
   setFilter: (filter) => set({ filter }),
+
+  setMarkedFlowId: (markedFlowId) =>
+    set((state) => ({
+      markedFlowId,
+      compareTargetFlowId:
+        !markedFlowId || (state.compareTargetFlowId && state.compareTargetFlowId === markedFlowId)
+          ? null
+          : state.compareTargetFlowId,
+    })),
+
+  setCompareTargetFlowId: (compareTargetFlowId) =>
+    set((state) => ({
+      compareTargetFlowId:
+        state.markedFlowId && compareTargetFlowId && compareTargetFlowId !== state.markedFlowId
+          ? compareTargetFlowId
+          : null,
+    })),
+
+  clearComparison: () => set({ markedFlowId: null, compareTargetFlowId: null }),
 
   getFilteredFlows: () => {
     const { flows, filter } = get();
