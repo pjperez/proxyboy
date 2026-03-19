@@ -7,6 +7,7 @@ import { AgentClient } from '../agent/client';
 import { replayFlowThroughProxy } from '../proxy/replay';
 import { setSystemProxy, clearSystemProxy, isSystemProxyEnabled } from '../utils/windows-proxy';
 import { ProxyState, Rule, HttpFlow, CaptureFilterMode } from '../../shared/types';
+import { normalizeThrottleSettings, type ThrottleSettings } from '../../shared/throttle';
 import { flowsToHar } from '../utils/har';
 import { randomUUID } from 'crypto';
 import { annotateGraphQLRequest } from '../../shared/graphql';
@@ -27,6 +28,7 @@ declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
 declare const MAIN_WINDOW_VITE_NAME: string;
 
 const NO_CACHE_SETTING_KEY = 'proxy:no-cache-enabled';
+const THROTTLE_SETTINGS_KEY = 'proxy:throttle-settings';
 
 export function registerIpcHandlers(
   mainWindow: BrowserWindow,
@@ -112,6 +114,21 @@ export function registerIpcHandlers(
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.PROXY_SET_THROTTLE, async (_event, settings: ThrottleSettings) => {
+    try {
+      const normalizedSettings = normalizeThrottleSettings(settings);
+      proxyEngine.setThrottleSettings(normalizedSettings);
+      setAppSetting(THROTTLE_SETTINGS_KEY, JSON.stringify(normalizedSettings));
+      return {
+        success: true,
+        throttleSettings: proxyEngine.getThrottleSettings(),
+        throttleProfile: proxyEngine.getThrottleProfile(),
+      };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.PROXY_STATUS, async (): Promise<ProxyState> => {
     return {
       running: proxyEngine.isRunning(),
@@ -119,6 +136,8 @@ export function registerIpcHandlers(
       host: '127.0.0.1',
       isSystemProxy: await isSystemProxyEnabled(),
       noCacheEnabled: proxyEngine.isNoCacheEnabled(),
+      throttleSettings: proxyEngine.getThrottleSettings(),
+      throttleProfile: proxyEngine.getThrottleProfile(),
       totalRequests: proxyEngine.getFlowCount(),
       activeConnections: 0,
       sslEnabled: true,
@@ -228,6 +247,15 @@ export function registerIpcHandlers(
     proxyEngine.setNoCacheEnabled(getAppSetting(NO_CACHE_SETTING_KEY) === 'true');
   } catch (err) {
     console.error('Failed to load no-cache setting from database:', err);
+  }
+
+  try {
+    const savedThrottleSettings = getAppSetting(THROTTLE_SETTINGS_KEY);
+    if (savedThrottleSettings) {
+      proxyEngine.setThrottleSettings(normalizeThrottleSettings(JSON.parse(savedThrottleSettings)));
+    }
+  } catch (err) {
+    console.error('Failed to load throttle settings from database:', err);
   }
 
   agentClient.setRuleManager({

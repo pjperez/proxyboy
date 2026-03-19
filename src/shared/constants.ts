@@ -6,6 +6,7 @@ export const IPC_CHANNELS = {
   PROXY_STATUS: 'proxy:status',
   PROXY_SET_SYSTEM: 'proxy:set-system-proxy',
   PROXY_SET_NO_CACHE: 'proxy:set-no-cache',
+  PROXY_SET_THROTTLE: 'proxy:set-throttle',
   PROXY_INSTALL_CERT: 'proxy:install-cert',
   PROXY_CERT_STATUS: 'proxy:cert-status',
   

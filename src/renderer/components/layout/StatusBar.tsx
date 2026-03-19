@@ -2,9 +2,23 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useAppStore } from '../../stores/app';
 import { useTrafficStore } from '../../stores/traffic';
 import { exportHarFile, importHarFile, toggleProxyRecording } from '../../utils/app-actions';
+import {
+  THROTTLE_PROFILE_PRESETS,
+  getThrottleProfileLabel,
+  normalizeThrottleSettings,
+  resolveThrottleProfile,
+  type ThrottleProfileId,
+} from '../../../shared/throttle';
 
 export default function StatusBar() {
-  const { proxyRunning, proxyPort, noCacheEnabled, setNoCacheEnabled } = useAppStore();
+  const {
+    proxyRunning,
+    proxyPort,
+    noCacheEnabled,
+    throttleSettings,
+    setNoCacheEnabled,
+    setThrottleSettings,
+  } = useAppStore();
   const { flows } = useTrafficStore();
   const [certInstalled, setCertInstalled] = useState<boolean | null>(null);
   const [certInstalling, setCertInstalling] = useState(false);
@@ -22,8 +36,9 @@ export default function StatusBar() {
     window.proxyboy?.proxy.getStatus().then((s: any) => {
       setIsSystemProxy(!!s?.isSystemProxy);
       setNoCacheEnabled(!!s?.noCacheEnabled);
+      setThrottleSettings(normalizeThrottleSettings(s?.throttleSettings));
     });
-  }, [proxyRunning, setNoCacheEnabled]);
+  }, [proxyRunning, setNoCacheEnabled, setThrottleSettings]);
 
   const toggleProxy = async () => {
     const result = await toggleProxyRecording(window.proxyboy, proxyRunning, isSystemProxy);
@@ -58,6 +73,22 @@ export default function StatusBar() {
     }
   };
 
+  const resolvedThrottleProfile = resolveThrottleProfile(throttleSettings);
+
+  const handleThrottleChange = async (profileId: ThrottleProfileId) => {
+    const nextSettings = normalizeThrottleSettings({
+      ...throttleSettings,
+      profileId,
+    });
+    const result = await window.proxyboy?.proxy.setThrottle(nextSettings);
+    if (result?.success) {
+      setThrottleSettings(normalizeThrottleSettings(result.throttleSettings));
+      return;
+    }
+
+    window.alert(result?.error || 'Failed to update the throttling profile.');
+  };
+
   return (
     <div className="h-7 bg-pb-surface flex items-center px-4 border-t border-pb-border text-xs select-none">
       <button
@@ -86,6 +117,23 @@ export default function StatusBar() {
       >
         🧊 {noCacheEnabled ? 'No Cache: ON' : 'No Cache: OFF'}
       </button>
+      <span className="mx-3 text-pb-border">|</span>
+      <label className={`flex items-center gap-2 ${resolvedThrottleProfile.active ? 'text-pb-accent' : 'text-pb-text-dim'}`}>
+        <span>🐢 Throttle</span>
+        <select
+          value={throttleSettings.profileId}
+          onChange={(event) => void handleThrottleChange(event.target.value as ThrottleProfileId)}
+          className="bg-transparent text-pb-text border border-pb-border rounded px-2 py-0.5"
+          title={resolvedThrottleProfile.description}
+        >
+          {THROTTLE_PROFILE_PRESETS.map((profile) => (
+            <option key={profile.id} value={profile.id}>
+              {profile.label}
+            </option>
+          ))}
+          <option value="custom">{getThrottleProfileLabel('custom')}</option>
+        </select>
+      </label>
       {errorCount > 0 && (
         <>
           <span className="mx-3 text-pb-border">|</span>
