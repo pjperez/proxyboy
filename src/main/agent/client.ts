@@ -44,6 +44,44 @@ function previewBody(body?: Buffer | string): string | null {
   return body.slice(0, 5000);
 }
 
+export interface SearchTrafficArgs {
+  query?: string;
+  method?: string;
+  statusCode?: number;
+  minDuration?: number;
+  graphqlOperationName?: string;
+}
+
+export function matchesSearchTraffic(flow: HttpFlow, args: SearchTrafficArgs): boolean {
+  if (args.query) {
+    const query = args.query.toLowerCase();
+    if (!flow.request.url.toLowerCase().includes(query)) {
+      return false;
+    }
+  }
+
+  if (args.method && flow.request.method !== args.method.toUpperCase()) {
+    return false;
+  }
+
+  if (args.statusCode && flow.response?.statusCode !== args.statusCode) {
+    return false;
+  }
+
+  if (args.minDuration && (!flow.response || flow.response.duration < args.minDuration)) {
+    return false;
+  }
+
+  if (args.graphqlOperationName) {
+    const graphqlOperationName = flow.request.graphqlOperationName?.toLowerCase() || '';
+    if (!graphqlOperationName.includes(args.graphqlOperationName.toLowerCase())) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
 export interface RuleManager {
   createRule(rule: Rule): void;
 }
@@ -122,6 +160,8 @@ export class AgentClient {
       id: flow.id,
       method: flow.request.method,
       url: flow.request.url,
+      graphqlOperationName: flow.request.graphqlOperationName || null,
+      graphqlOperationType: flow.request.graphqlOperationType || null,
       status: flow.response?.statusCode || null,
       duration: flow.response?.duration || null,
       bodySize: flow.response?.bodySize || 0,
@@ -142,14 +182,21 @@ export class AgentClient {
         },
       }),
       defineTool('searchTraffic', {
-        description: 'Search captured traffic by query, method, status code, or min duration',
-        parameters: { type: 'object', properties: { query: { type: 'string' }, method: { type: 'string' }, statusCode: { type: 'number' }, minDuration: { type: 'number' } } },
+        description: 'Search captured traffic by query, method, status code, min duration, or GraphQL operation name',
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string' },
+            method: { type: 'string' },
+            statusCode: { type: 'number' },
+            minDuration: { type: 'number' },
+            graphqlOperationName: { type: 'string' },
+          },
+        },
         handler: async (args: any) => {
+          const filters = (args || {}) as SearchTrafficArgs;
           let flows = engine.getFlows();
-          if (args?.query) { const q = args.query.toLowerCase(); flows = flows.filter((f: HttpFlow) => f.request.url.toLowerCase().includes(q)); }
-          if (args?.method) { flows = flows.filter((f: HttpFlow) => f.request.method === args.method.toUpperCase()); }
-          if (args?.statusCode) { flows = flows.filter((f: HttpFlow) => f.response?.statusCode === args.statusCode); }
-          if (args?.minDuration) { flows = flows.filter((f: HttpFlow) => f.response && f.response.duration >= args.minDuration); }
+          flows = flows.filter((flow: HttpFlow) => matchesSearchTraffic(flow, filters));
           return { count: flows.length, flows: flows.slice(0, 50).map(summarizeFlow) };
         },
       }),
