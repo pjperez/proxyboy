@@ -5,6 +5,7 @@ export const IPC_CHANNELS = {
   PROXY_STOP: 'proxy:stop',
   PROXY_STATUS: 'proxy:status',
   PROXY_SET_SYSTEM: 'proxy:set-system-proxy',
+  PROXY_SET_NO_CACHE: 'proxy:set-no-cache',
   PROXY_INSTALL_CERT: 'proxy:install-cert',
   PROXY_CERT_STATUS: 'proxy:cert-status',
   
@@ -16,6 +17,7 @@ export const IPC_CHANNELS = {
   TRAFFIC_GET_FLOWS: 'traffic:get-flows',
   TRAFFIC_GET_FLOW: 'traffic:get-flow',
   TRAFFIC_DELETE: 'traffic:delete',
+  TRAFFIC_REPEAT: 'traffic:repeat',
   
   // Rules
   RULES_GET_ALL: 'rules:get-all',
@@ -58,3 +60,4 @@ export const DEFAULT_PROXY_PORT = 9090;
 export const DEFAULT_PROXY_HOST = '127.0.0.1';
 export const APP_NAME = 'ProxyBoy';
 export const APP_VERSION = '1.0.0';
+export const INTERNAL_REPLAY_HEADER = 'x-proxyboy-replay';

@@ -4,7 +4,7 @@ import { useTrafficStore } from '../../stores/traffic';
 import { exportHarFile, importHarFile, toggleProxyRecording } from '../../utils/app-actions';
 
 export default function StatusBar() {
-  const { proxyRunning, proxyPort } = useAppStore();
+  const { proxyRunning, proxyPort, noCacheEnabled, setNoCacheEnabled } = useAppStore();
   const { flows } = useTrafficStore();
   const [certInstalled, setCertInstalled] = useState<boolean | null>(null);
   const [certInstalling, setCertInstalling] = useState(false);
@@ -19,14 +19,11 @@ export default function StatusBar() {
     window.proxyboy?.proxy.getCertStatus().then((s: any) => {
       setCertInstalled(s.installed);
     });
-    if (proxyRunning) {
-      window.proxyboy?.proxy.getStatus().then((s: any) => {
-        setIsSystemProxy(!!s?.isSystemProxy);
-      });
-    } else {
-      setIsSystemProxy(false);
-    }
-  }, [proxyRunning]);
+    window.proxyboy?.proxy.getStatus().then((s: any) => {
+      setIsSystemProxy(!!s?.isSystemProxy);
+      setNoCacheEnabled(!!s?.noCacheEnabled);
+    });
+  }, [proxyRunning, setNoCacheEnabled]);
 
   const toggleProxy = async () => {
     const result = await toggleProxyRecording(window.proxyboy, proxyRunning, isSystemProxy);
@@ -54,6 +51,13 @@ export default function StatusBar() {
     }
   };
 
+  const toggleNoCache = async () => {
+    const result = await window.proxyboy?.proxy.setNoCache(!noCacheEnabled);
+    if (result?.success) {
+      setNoCacheEnabled(!noCacheEnabled);
+    }
+  };
+
   return (
     <div className="h-7 bg-pb-surface flex items-center px-4 border-t border-pb-border text-xs select-none">
       <button
@@ -73,6 +77,15 @@ export default function StatusBar() {
       <span className="text-pb-text-dim">
         Requests: <span className="text-pb-text">{flows.length}</span>
       </span>
+      <span className="mx-3 text-pb-border">|</span>
+      <button
+        onClick={toggleNoCache}
+        className={`flex items-center gap-1 transition-colors ${
+          noCacheEnabled ? 'text-pb-accent' : 'text-pb-text-dim hover:text-pb-text'
+        }`}
+      >
+        🧊 {noCacheEnabled ? 'No Cache: ON' : 'No Cache: OFF'}
+      </button>
       {errorCount > 0 && (
         <>
           <span className="mx-3 text-pb-border">|</span>
