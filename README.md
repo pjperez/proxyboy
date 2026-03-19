@@ -21,6 +21,7 @@ ProxyBoy is a man-in-the-middle (MITM) HTTP/HTTPS proxy that captures, inspects,
 - **AI Assistant** — Chat panel powered by GitHub Copilot that can search traffic, analyze patterns, create rules, and export data
 - **Breakpoint Rules** — Pause requests/responses mid-flight, inspect them, then forward or drop
 - **Map Local Rules** — Serve local files instead of remote responses for mocking APIs
+- **Capture Rules** — Switch between capture-all, allow-list, and block-list modes to control what gets recorded
 - **System Proxy Integration** — Toggle Windows system proxy on/off from the app
 - **HAR Export/Import** — Standard HAR format for sharing captures with other tools
 - **Configurable Columns** — Show/hide columns, sort by any field, timestamps

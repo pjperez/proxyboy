@@ -26,6 +26,8 @@ export const IPC_CHANNELS = {
   RULES_DELETE: 'rules:delete',
   RULES_TOGGLE: 'rules:toggle',
   RULES_CREATED: 'rules:created',
+  RULES_GET_CAPTURE_MODE: 'rules:get-capture-mode',
+  RULES_SET_CAPTURE_MODE: 'rules:set-capture-mode',
   
   // Breakpoint
   BREAKPOINT_PAUSED: 'breakpoint:paused',

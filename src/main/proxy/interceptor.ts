@@ -1,4 +1,4 @@
-import { HttpFlow, HttpRequest, HttpResponse, BreakpointRule, MapLocalRule, Rule } from '../../shared/types';
+import { HttpFlow, BreakpointRule, MapLocalRule, Rule, AllowListRule, BlockListRule, CaptureFilterMode } from '../../shared/types';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -6,6 +6,9 @@ import * as os from 'os';
 export class Interceptor {
   private breakpointRules: BreakpointRule[] = [];
   private mapLocalRules: MapLocalRule[] = [];
+  private allowListRules: AllowListRule[] = [];
+  private blockListRules: BlockListRule[] = [];
+  private captureMode: CaptureFilterMode = 'capture-all';
   private regexCache: Map<string, RegExp> = new Map();
   private pausedFlows: Map<string, {
     resolve: (action: 'forward' | 'drop') => void;
@@ -15,7 +18,17 @@ export class Interceptor {
   setRules(rules: Rule[]): void {
     this.breakpointRules = rules.filter((r): r is BreakpointRule => r.type === 'breakpoint' && r.enabled);
     this.mapLocalRules = rules.filter((r): r is MapLocalRule => r.type === 'map-local' && r.enabled);
+    this.allowListRules = rules.filter((r): r is AllowListRule => r.type === 'allow-list' && r.enabled);
+    this.blockListRules = rules.filter((r): r is BlockListRule => r.type === 'block-list' && r.enabled);
     this.regexCache.clear();
+  }
+
+  setCaptureMode(mode: CaptureFilterMode): void {
+    this.captureMode = mode;
+  }
+
+  getCaptureMode(): CaptureFilterMode {
+    return this.captureMode;
   }
 
   getBreakpointRuleCount(): number {
@@ -77,11 +90,37 @@ export class Interceptor {
     return re ? re.test(url) : false;
   }
 
+  private matchesRule(rule: Rule, url: string, method: string): boolean {
+    if (!this.matchesUrl(rule.matchCriteria.urlPattern, url, rule.matchCriteria.isRegex)) {
+      return false;
+    }
+
+    if (rule.matchCriteria.methods?.length && !rule.matchCriteria.methods.includes(method)) {
+      return false;
+    }
+
+    return true;
+  }
+
+  shouldCapture(url: string, method: string): boolean {
+    if (this.captureMode === 'block-list') {
+      return !this.blockListRules.some((rule) => this.matchesRule(rule, url, method));
+    }
+
+    if (this.captureMode === 'allow-list') {
+      if (this.allowListRules.length === 0) {
+        return true;
+      }
+      return this.allowListRules.some((rule) => this.matchesRule(rule, url, method));
+    }
+
+    return true;
+  }
+
   shouldBreakpoint(flow: HttpFlow, phase: 'request' | 'response'): BreakpointRule | null {
     for (const rule of this.breakpointRules) {
       if (rule.breakOn !== phase && rule.breakOn !== 'both') continue;
-      if (!this.matchesUrl(rule.matchCriteria.urlPattern, flow.request.url, rule.matchCriteria.isRegex)) continue;
-      if (rule.matchCriteria.methods && !rule.matchCriteria.methods.includes(flow.request.method)) continue;
+      if (!this.matchesRule(rule, flow.request.url, flow.request.method)) continue;
       return rule;
     }
     return null;
@@ -89,8 +128,7 @@ export class Interceptor {
 
   getMapLocalRule(url: string, method: string): MapLocalRule | null {
     for (const rule of this.mapLocalRules) {
-      if (!this.matchesUrl(rule.matchCriteria.urlPattern, url, rule.matchCriteria.isRegex)) continue;
-      if (rule.matchCriteria.methods && !rule.matchCriteria.methods.includes(method)) continue;
+      if (!this.matchesRule(rule, url, method)) continue;
       return rule;
     }
     return null;

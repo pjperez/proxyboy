@@ -192,10 +192,10 @@ export function getAppSetting(key: string): string | null {
   let value: string | null = null;
   if (stmt.step()) {
     const row = stmt.getAsObject();
-    value = row.value as string;
+    value = typeof row.value === 'string' ? row.value : null;
   }
-  stmt.free();
 
+  stmt.free();
   return value;
 }
 

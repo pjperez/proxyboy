@@ -201,6 +201,15 @@ export class ProxyEngine extends EventEmitter {
     };
 
     this.proxy.onRequest((ctx: any, callback: () => void) => {
+      const requestMethod = ctx.clientToProxyRequest.method || 'GET';
+      const requestHost = ctx.clientToProxyRequest.headers.host || '';
+      const requestUrl = (ctx.isSSL ? 'https' : 'http') + '://' + requestHost + ctx.clientToProxyRequest.url;
+
+      if (!this.interceptor.shouldCapture(requestUrl, requestMethod)) {
+        callback();
+        return;
+      }
+
       const flowId = randomUUID();
       const chunks: Buffer[] = [];
       const startTime = Date.now();
@@ -212,10 +221,10 @@ export class ProxyEngine extends EventEmitter {
 
       const request: HttpRequest = {
         id: randomUUID(),
-        method: ctx.clientToProxyRequest.method || 'GET',
-        url: (ctx.isSSL ? 'https' : 'http') + '://' + ctx.clientToProxyRequest.headers.host + ctx.clientToProxyRequest.url,
+        method: requestMethod,
+        url: requestUrl,
         protocol: ctx.isSSL ? 'https' : 'http',
-        host: ctx.clientToProxyRequest.headers.host || '',
+        host: requestHost,
         path: ctx.clientToProxyRequest.url || '/',
         headers: { ...ctx.clientToProxyRequest.headers },
         bodySize: 0,
