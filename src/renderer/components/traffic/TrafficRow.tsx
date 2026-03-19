@@ -1,6 +1,7 @@
 import React from 'react';
 import type { HttpFlow } from '../../../shared/types';
 import type { ColumnKey } from './TrafficList';
+import { getTrafficRowAccentColor, type TrafficRowColorMode } from '../../utils/traffic-row-colors';
 
 interface Props {
   flow: HttpFlow;
@@ -8,6 +9,7 @@ interface Props {
   onSelect: (id: string) => void;
   onContextMenu?: (e: React.MouseEvent, flow: HttpFlow) => void;
   visibleColumns: Set<ColumnKey>;
+  colorMode: TrafficRowColorMode;
   /** Stable string key for memo comparison (avoids Set reference issues) */
   columnKey?: string;
 }
@@ -74,16 +76,18 @@ function getContentType(headers?: Record<string, any>): string {
   return ct.split(';')[0].split('/').pop() || '—';
 }
 
-function TrafficRowInner({ flow, selected, onSelect, onContextMenu, visibleColumns }: Props) {
+function TrafficRowInner({ flow, selected, onSelect, onContextMenu, visibleColumns, colorMode }: Props) {
   const pathPart = flow.request.url.replace(/^https?:\/\/[^/]+/, '');
   const v = visibleColumns;
+  const accentColor = getTrafficRowAccentColor(flow, colorMode);
 
   return (
     <div
       onClick={() => onSelect(flow.id)}
       onContextMenu={(e) => onContextMenu?.(e, flow)}
-      className={`flex items-center h-8 px-3 text-xs cursor-pointer border-b border-pb-border/30 transition-colors
+      className={`flex items-center h-8 px-3 text-xs cursor-pointer border-b border-l-[3px] border-pb-border/30 transition-colors
         ${selected ? 'bg-pb-accent/15 text-pb-text' : 'hover:bg-pb-surface-hover text-pb-text'}`}
+      style={{ borderLeftColor: accentColor }}
     >
       {v.has('timestamp') && (
         <span className="w-20 font-mono text-pb-text-dim" title={new Date(flow.createdAt || flow.request.timestamp).toISOString()}>
@@ -162,6 +166,7 @@ const TrafficRow = React.memo(TrafficRowInner, (prev, next) => {
     prev.selected === next.selected &&
     prev.onSelect === next.onSelect &&
     prev.onContextMenu === next.onContextMenu &&
+    prev.colorMode === next.colorMode &&
     prev.columnKey === next.columnKey
   );
 });
