@@ -128,7 +128,7 @@ function initializeSchema(database: SqlJsDatabase): void {
   database.run(`
     CREATE TABLE IF NOT EXISTS app_settings (
       key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
+      value TEXT NOT NULL,
       updated_at INTEGER NOT NULL
     );
   `);
@@ -162,6 +162,9 @@ function initializeSchema(database: SqlJsDatabase): void {
   ensureColumn(database, 'requests', 'graphql_operation_type', 'TEXT');
   ensureColumn(database, 'requests', 'graphql_operation_name', 'TEXT');
   ensureColumn(database, 'responses', 'body_encoding', "TEXT DEFAULT 'utf8'");
+  ensureColumn(database, 'rules', 'updated_at', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(database, 'app_settings', 'updated_at', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(database, 'agent_conversations', 'updated_at', 'INTEGER NOT NULL DEFAULT 0');
 }
 
 function ensureColumn(database: SqlJsDatabase, table: string, column: string, definition: string): void {
