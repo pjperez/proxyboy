@@ -120,6 +120,18 @@ To inspect HTTPS traffic, you'll need to trust ProxyBoy's root CA certificate:
 
 The certificate is generated locally and stored in your user profile. It never leaves your machine.
 
+### Troubleshooting SSL
+
+If a request fails immediately after TLS setup and ProxyBoy tags it as `ssl-pinning-suspected`, the target app is probably rejecting the ProxyBoy MITM certificate instead of accepting your locally trusted CA.
+
+Common approaches:
+
+1. **Android debug builds** — Use a debug-only network security config or a test build that trusts user-installed CAs.
+2. **iOS simulators** — Prefer development builds with pinning disabled, or use instrumentation tools in local test environments.
+3. **Desktop apps / Electron apps** — Check for developer flags, debug certificates, or test-only trust overrides before trying to intercept production builds.
+
+ProxyBoy can only point out the likely cause. Certificate pinning bypasses are app-specific, and the safest path is usually a debug/test build with relaxed certificate validation.
+
 ---
 
 ## Project Structure
