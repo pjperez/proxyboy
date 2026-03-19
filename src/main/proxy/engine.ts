@@ -4,6 +4,7 @@ import type { IProxy } from 'http-mitm-proxy';
 import { randomUUID } from 'crypto';
 import { gunzipSync, inflateSync, brotliDecompressSync } from 'zlib';
 import { HttpFlow, HttpRequest, HttpResponse } from '../../shared/types';
+import { INTERNAL_REPLAY_HEADER } from '../../shared/constants';
 import { CertificateManager } from './certificate';
 import { Interceptor } from './interceptor';
 import { DnsResolverService } from './dns-resolver';
@@ -189,6 +190,11 @@ export class ProxyEngine extends EventEmitter {
       const flowId = randomUUID();
       const chunks: Buffer[] = [];
       const startTime = Date.now();
+      const replayed = Boolean(ctx.clientToProxyRequest.headers[INTERNAL_REPLAY_HEADER]);
+      if (replayed) {
+        delete ctx.clientToProxyRequest.headers[INTERNAL_REPLAY_HEADER];
+      }
+      const initialTags = replayed ? ['replayed'] : [];
 
       const request: HttpRequest = {
         id: randomUUID(),
@@ -225,7 +231,7 @@ export class ProxyEngine extends EventEmitter {
               duration: Date.now() - startTime,
             },
             state: 'complete',
-            tags: ['map-local'],
+            tags: [...initialTags, 'map-local'],
             createdAt: startTime,
           };
           this.flows.set(flowId, flow);
@@ -238,7 +244,7 @@ export class ProxyEngine extends EventEmitter {
         id: flowId,
         request,
         state: 'pending',
-        tags: [],
+        tags: [...initialTags],
         createdAt: startTime,
         timing: { start: startTime },
       };
