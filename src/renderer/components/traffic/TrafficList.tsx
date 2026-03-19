@@ -166,6 +166,16 @@ export default function TrafficList({ flows, selectedId, onSelect }: Props) {
   const buildMenuItems = useCallback((flow: HttpFlow): ContextMenuItem[] => {
     return [
       {
+        label: 'Repeat Request',
+        icon: '↻',
+        onClick: async () => {
+          const result = await window.proxyboy?.traffic.repeat(flow.id);
+          if (!result?.success) {
+            window.alert(result?.error || 'Failed to replay the request.');
+          }
+        },
+      },
+      {
         label: 'Copy as cURL',
         icon: '⌘',
         onClick: () => navigator.clipboard.writeText(flowToCurl(flow)),
