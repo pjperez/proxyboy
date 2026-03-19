@@ -12,6 +12,13 @@ import { buildSslPinningGuidance, isSuspectedSslPinningError } from './ssl-pinni
 import { ProxyEngineOptions } from './types';
 import { annotateGraphQLRequest } from '../../shared/graphql';
 import { applyNoCacheToRequestHeaders, applyNoCacheToResponseHeaders } from './no-cache';
+import { createFlowThrottleController } from './throttle';
+import {
+  DEFAULT_THROTTLE_SETTINGS,
+  normalizeThrottleSettings,
+  resolveThrottleProfile,
+  type ThrottleSettings,
+} from '../../shared/throttle';
 
 const MAX_FLOWS = 10000;
 const MAX_BODY_SIZE = 2 * 1024 * 1024; // 2 MB
@@ -53,6 +60,7 @@ export class ProxyEngine extends EventEmitter {
   private origStdoutWrite: typeof process.stdout.write | null = null;
   private origStderrWrite: typeof process.stderr.write | null = null;
   private noCacheEnabled = false;
+  private throttleSettings: ThrottleSettings = DEFAULT_THROTTLE_SETTINGS;
 
   constructor(options: ProxyEngineOptions, certManager: CertificateManager) {
     super();
@@ -85,6 +93,18 @@ export class ProxyEngine extends EventEmitter {
 
   setNoCacheEnabled(enabled: boolean): void {
     this.noCacheEnabled = enabled;
+  }
+
+  getThrottleSettings(): ThrottleSettings {
+    return this.throttleSettings;
+  }
+
+  getThrottleProfile() {
+    return resolveThrottleProfile(this.throttleSettings);
+  }
+
+  setThrottleSettings(settings: ThrottleSettings): void {
+    this.throttleSettings = normalizeThrottleSettings(settings);
   }
 
   setPort(port: number): void {
@@ -247,10 +267,15 @@ export class ProxyEngine extends EventEmitter {
       const chunks: Buffer[] = [];
       const startTime = Date.now();
       const replayed = Boolean(ctx.clientToProxyRequest.headers[INTERNAL_REPLAY_HEADER]);
+      const throttleController = createFlowThrottleController(this.throttleSettings);
+      const throttleProfile = throttleController.getProfile();
       if (replayed) {
         delete ctx.clientToProxyRequest.headers[INTERNAL_REPLAY_HEADER];
       }
       const initialTags = replayed ? ['replayed'] : [];
+      if (throttleProfile.active) {
+        initialTags.push('throttled', `throttle-${throttleProfile.id}`);
+      }
 
       const request: HttpRequest = {
         id: randomUUID(),
@@ -319,7 +344,7 @@ export class ProxyEngine extends EventEmitter {
       // Collect request body
       ctx.onRequestData((ctx: any, chunk: Buffer, callback: (err: null, chunk: Buffer) => void) => {
         chunks.push(chunk);
-        callback(null, chunk);
+        throttleController.scheduleUploadChunk(chunk, callback);
       });
 
       ctx.onRequestEnd((ctx: any, callback: () => void) => {
@@ -371,7 +396,7 @@ export class ProxyEngine extends EventEmitter {
           firstByteRecorded = true;
         }
         responseChunks.push(chunk);
-        callback(null, chunk);
+        throttleController.scheduleDownloadChunk(chunk, callback);
       });
 
       ctx.onResponseEnd((ctx: any, cb: () => void) => {
@@ -434,12 +459,12 @@ export class ProxyEngine extends EventEmitter {
             this.emit('flow:complete', flow);
             return;
           }
-          this.resolveAndConnect(flow, ctx, callback);
+          this.resolveAndConnect(flow, ctx, callback, throttleController.getConnectionLatencyMs());
         });
         return;
       }
 
-      this.resolveAndConnect(flow, ctx, callback);
+      this.resolveAndConnect(flow, ctx, callback, throttleController.getConnectionLatencyMs());
     });
   }
 
@@ -447,9 +472,13 @@ export class ProxyEngine extends EventEmitter {
    * Performs timed DNS lookup, calls the proxy callback, then hooks the
    * upstream socket to capture TCP connect timing.
    */
-  private resolveAndConnect(flow: HttpFlow, ctx: any, callback: () => void): void {
+  private resolveAndConnect(flow: HttpFlow, ctx: any, callback: () => void, connectionLatencyMs = 0): void {
     const hostname = (flow.request.host || '').split(':')[0];
     if (!hostname) {
+      if (connectionLatencyMs > 0) {
+        setTimeout(callback, connectionLatencyMs);
+        return;
+      }
       callback();
       return;
     }
@@ -459,47 +488,57 @@ export class ProxyEngine extends EventEmitter {
         if (flow.timing) {
           flow.timing.dnsStart = dnsStart;
           flow.timing.dnsEnd = dnsEnd;
-          flow.timing.connectStart = Date.now();
         }
         if (cacheHit) {
           flow.tags.push('dns-cache-hit');
         }
 
-        callback();
-
-        // Hook upstream socket for TCP connect timing
-        process.nextTick(() => {
-          try {
-            const req = ctx.proxyToServerRequest;
-            if (!req) return;
-
-            const socket = req.socket || req.connection;
-            if (!socket) {
-              req.once?.('socket', (sock: any) => {
-                if (sock.connecting) {
-                  sock.once('connect', () => {
-                    if (flow.timing) flow.timing.connectEnd = Date.now();
-                  });
-                } else if (flow.timing) {
-                  flow.timing.connectEnd = flow.timing.connectStart;
-                  flow.tags.push('connection-reused');
-                }
-              });
-              return;
-            }
-
-            if (socket.connecting) {
-              socket.once('connect', () => {
-                if (flow.timing) flow.timing.connectEnd = Date.now();
-              });
-            } else if (flow.timing) {
-              flow.timing.connectEnd = flow.timing.connectStart;
-              flow.tags.push('connection-reused');
-            }
-          } catch {
-            // Non-critical — timing just won't include TCP
+        const continueConnect = () => {
+          if (flow.timing) {
+            flow.timing.connectStart = Date.now();
           }
-        });
+          callback();
+          // Hook upstream socket for TCP connect timing
+          process.nextTick(() => {
+            try {
+              const req = ctx.proxyToServerRequest;
+              if (!req) return;
+
+              const socket = req.socket || req.connection;
+              if (!socket) {
+                req.once?.('socket', (sock: any) => {
+                  if (sock.connecting) {
+                    sock.once('connect', () => {
+                      if (flow.timing) flow.timing.connectEnd = Date.now();
+                    });
+                  } else if (flow.timing) {
+                    flow.timing.connectEnd = flow.timing.connectStart;
+                    flow.tags.push('connection-reused');
+                  }
+                });
+                return;
+              }
+
+              if (socket.connecting) {
+                socket.once('connect', () => {
+                  if (flow.timing) flow.timing.connectEnd = Date.now();
+                });
+              } else if (flow.timing) {
+                flow.timing.connectEnd = flow.timing.connectStart;
+                flow.tags.push('connection-reused');
+              }
+            } catch {
+              // Non-critical — timing just won't include TCP
+            }
+          });
+        };
+
+        if (connectionLatencyMs > 0) {
+          setTimeout(continueConnect, connectionLatencyMs);
+          return;
+        }
+
+        continueConnect();
       })
       .catch((error: Error) => {
         flow.tags.push('dns-error');

@@ -2,14 +2,23 @@ import React, { useState, useEffect } from 'react';
 import { useAppStore } from '../../stores/app';
 import type { TrafficRowColorMode } from '../../utils/traffic-row-colors';
 import { resolveThemePreference } from '../../utils/theme';
+import {
+  THROTTLE_PROFILE_PRESETS,
+  normalizeCustomThrottleProfile,
+  normalizeThrottleSettings,
+  resolveThrottleProfile,
+  type ThrottleProfileId,
+} from '../../../shared/throttle';
 
 export default function SettingsPanel() {
   const {
     proxyPort,
     theme,
     noCacheEnabled,
+    throttleSettings,
     trafficRowColorMode,
     setNoCacheEnabled,
+    setThrottleSettings,
     setTheme,
     setTrafficRowColorMode,
   } = useAppStore();
@@ -22,6 +31,8 @@ export default function SettingsPanel() {
   const [dnsServers, setDnsServers] = useState('');
   const [dnsApplied, setDnsApplied] = useState(false);
   const [dnsError, setDnsError] = useState<string | null>(null);
+  const [throttleDraft, setThrottleDraft] = useState(() => throttleSettings.customProfile);
+  const [throttleError, setThrottleError] = useState<string | null>(null);
 
   useEffect(() => {
     window.proxyboy?.proxy.getCertStatus().then((status: { installed: boolean }) => {
@@ -36,6 +47,10 @@ export default function SettingsPanel() {
       }
     }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    setThrottleDraft(throttleSettings.customProfile);
+  }, [throttleSettings]);
 
   const handleAutoStartToggle = () => {
     const next = !autoStart;
@@ -61,6 +76,23 @@ export default function SettingsPanel() {
     } finally {
       setInstalling(false);
     }
+  };
+
+  const applyThrottleSettings = async (nextProfileId: ThrottleProfileId, customProfile = throttleDraft) => {
+    const nextSettings = normalizeThrottleSettings({
+      profileId: nextProfileId,
+      customProfile,
+    });
+
+    const result = await window.proxyboy?.proxy.setThrottle(nextSettings);
+    if (result?.success) {
+      setThrottleSettings(normalizeThrottleSettings(result.throttleSettings));
+      setThrottleDraft(normalizeThrottleSettings(result.throttleSettings).customProfile);
+      setThrottleError(null);
+      return;
+    }
+
+    setThrottleError(result?.error || 'Failed to update the throttling profile.');
   };
 
   const handleDnsModeChange = async (mode: 'system' | 'custom') => {
@@ -100,6 +132,7 @@ export default function SettingsPanel() {
   };
 
   const resolvedTheme = resolveThemePreference(theme);
+  const resolvedThrottleProfile = resolveThrottleProfile(throttleSettings);
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
@@ -120,6 +153,68 @@ export default function SettingsPanel() {
         </Row>
         <Row label="Disable caching for future requests">
           <Toggle checked={noCacheEnabled} onChange={handleNoCacheToggle} />
+        </Row>
+        <Row label="Network throttling">
+          <div className="flex flex-col items-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
+              {THROTTLE_PROFILE_PRESETS.map((profile) => (
+                <OptionButton
+                  key={profile.id}
+                  label={profile.label}
+                  active={throttleSettings.profileId === profile.id}
+                  onClick={() => void applyThrottleSettings(profile.id)}
+                />
+              ))}
+              <OptionButton
+                label="Custom"
+                active={throttleSettings.profileId === 'custom'}
+                onClick={() => void applyThrottleSettings('custom')}
+              />
+            </div>
+            <span className="text-xs text-pb-text-dim max-w-md text-right">
+              {resolvedThrottleProfile.description}
+            </span>
+          </div>
+        </Row>
+        <Row label="Custom throttle">
+          <div className="flex flex-col items-end gap-2">
+            <div className="grid grid-cols-3 gap-2">
+              <NumberField
+                label="Download kbps"
+                value={throttleDraft.downloadKbps}
+                onChange={(value) => setThrottleDraft((current) => normalizeCustomThrottleProfile({
+                  ...current,
+                  downloadKbps: value,
+                }))}
+              />
+              <NumberField
+                label="Upload kbps"
+                value={throttleDraft.uploadKbps}
+                onChange={(value) => setThrottleDraft((current) => normalizeCustomThrottleProfile({
+                  ...current,
+                  uploadKbps: value,
+                }))}
+              />
+              <NumberField
+                label="Latency ms"
+                value={throttleDraft.latencyMs}
+                onChange={(value) => setThrottleDraft((current) => normalizeCustomThrottleProfile({
+                  ...current,
+                  latencyMs: value,
+                }))}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => void applyThrottleSettings('custom')}
+                className="px-3 py-1.5 rounded text-sm font-medium bg-pb-accent text-pb-bg hover:bg-pb-accent/80"
+              >
+                Apply Custom Profile
+              </button>
+              <span className="text-xs text-pb-text-dim">Applies to all proxied traffic.</span>
+              {throttleError && <span className="text-xs text-pb-error">{throttleError}</span>}
+            </div>
+          </div>
         </Row>
       </Section>
 
@@ -360,5 +455,29 @@ function OptionButton({
     >
       {label}{disabled ? ' (coming soon)' : ''}
     </button>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-xs text-pb-text-dim">
+      <span>{label}</span>
+      <input
+        type="number"
+        min={0}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="bg-pb-bg border border-pb-border rounded px-3 py-1.5 text-sm text-pb-text w-28
+          focus:outline-none focus:border-pb-accent"
+      />
+    </label>
   );
 }

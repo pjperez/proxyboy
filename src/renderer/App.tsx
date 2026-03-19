@@ -19,6 +19,7 @@ import { flowToCurl } from './utils/curl';
 import { clearTrafficFlows, deleteTrafficFlow, exportHarFile, importHarFile, toggleProxyRecording } from './utils/app-actions';
 import { getNextSelectedFlowIdAfterDelete } from './utils/shortcuts';
 import { applyThemePreference, watchSystemTheme } from './utils/theme';
+import { normalizeThrottleSettings } from '../shared/throttle';
 
 declare global {
   interface Window {
@@ -87,7 +88,7 @@ function MainApp() {
   const clearComparison = useTrafficStore(s => s.clearComparison);
   const getFilteredFlows = useTrafficStore(s => s.getFilteredFlows);
   const { addRule } = useRulesStore();
-  const { proxyRunning, setProxyRunning, setNoCacheEnabled, theme } = useAppStore();
+  const { proxyRunning, setProxyRunning, setNoCacheEnabled, setThrottleSettings, theme } = useAppStore();
 
   useEffect(() => {
     const syncTheme = () => {
@@ -132,6 +133,7 @@ function MainApp() {
     api.proxy.getStatus().then((status: any) => {
       setProxyRunning(status.running);
       setNoCacheEnabled(!!status.noCacheEnabled);
+      setThrottleSettings(normalizeThrottleSettings(status.throttleSettings));
       if (status.port) {
         useAppStore.getState().setProxyPort(status.port);
       }

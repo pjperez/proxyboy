@@ -1,3 +1,5 @@
+import type { ResolvedThrottleProfile, ThrottleSettings } from './throttle';
+
 // Core HTTP flow types
 export interface HttpHeaders {
   [key: string]: string | string[];
@@ -74,6 +76,8 @@ export interface ProxyState {
   host: string;
   isSystemProxy: boolean;
   noCacheEnabled: boolean;
+  throttleSettings: ThrottleSettings;
+  throttleProfile: ResolvedThrottleProfile;
   totalRequests: number;
   activeConnections: number;
   sslEnabled: boolean;
