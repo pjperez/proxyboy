@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { TrafficRowColorMode } from '../utils/traffic-row-colors';
+import { loadThemePreference, persistThemePreference, type ThemePreference } from '../utils/theme';
 
 const TRAFFIC_ROW_COLOR_MODE_STORAGE_KEY = 'proxyboy-traffic-row-colors';
 
@@ -36,12 +37,12 @@ interface AppState {
   proxyRunning: boolean;
   proxyPort: number;
   noCacheEnabled: boolean;
-  theme: 'dark' | 'light';
+  theme: ThemePreference;
   trafficRowColorMode: TrafficRowColorMode;
   setProxyRunning: (running: boolean) => void;
   setProxyPort: (port: number) => void;
   setNoCacheEnabled: (enabled: boolean) => void;
-  setTheme: (theme: 'dark' | 'light') => void;
+  setTheme: (theme: ThemePreference) => void;
   setTrafficRowColorMode: (mode: TrafficRowColorMode) => void;
 }
 
@@ -49,12 +50,15 @@ export const useAppStore = create<AppState>((set) => ({
   proxyRunning: false,
   proxyPort: 9090,
   noCacheEnabled: false,
-  theme: 'dark',
+  theme: loadThemePreference(),
   trafficRowColorMode: loadTrafficRowColorMode(),
   setProxyRunning: (running) => set({ proxyRunning: running }),
   setProxyPort: (port) => set({ proxyPort: port }),
   setNoCacheEnabled: (enabled) => set({ noCacheEnabled: enabled }),
-  setTheme: (theme) => set({ theme }),
+  setTheme: (theme) => {
+    persistThemePreference(theme);
+    set({ theme });
+  },
   setTrafficRowColorMode: (trafficRowColorMode) => {
     persistTrafficRowColorMode(trafficRowColorMode);
     set({ trafficRowColorMode });

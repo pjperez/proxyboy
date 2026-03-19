@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAppStore } from '../../stores/app';
 import type { TrafficRowColorMode } from '../../utils/traffic-row-colors';
+import { resolveThemePreference } from '../../utils/theme';
 
 export default function SettingsPanel() {
   const {
@@ -9,6 +10,7 @@ export default function SettingsPanel() {
     noCacheEnabled,
     trafficRowColorMode,
     setNoCacheEnabled,
+    setTheme,
     setTrafficRowColorMode,
   } = useAppStore();
   const [autoStart, setAutoStart] = useState(() =>
@@ -96,6 +98,8 @@ export default function SettingsPanel() {
   const handleClearDnsCache = () => {
     window.proxyboy?.dns.clearCache();
   };
+
+  const resolvedTheme = resolveThemePreference(theme);
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
@@ -222,9 +226,27 @@ export default function SettingsPanel() {
       {/* Appearance */}
       <Section title="Appearance">
         <Row label="Theme">
-          <div className="flex gap-2">
-            <OptionButton label="Dark" active={theme === 'dark'} />
-            <OptionButton label="Light" disabled />
+          <div className="flex flex-col items-end gap-2">
+            <div className="flex gap-2">
+              <OptionButton
+                label="Dark"
+                active={theme === 'dark'}
+                onClick={() => setTheme('dark')}
+              />
+              <OptionButton
+                label="Light"
+                active={theme === 'light'}
+                onClick={() => setTheme('light')}
+              />
+              <OptionButton
+                label="System"
+                active={theme === 'system'}
+                onClick={() => setTheme('system')}
+              />
+            </div>
+            <span className="text-xs text-pb-text-dim">
+              System follows Windows appearance. Currently using {resolvedTheme}.
+            </span>
           </div>
         </Row>
         <Row label="Traffic row colors">

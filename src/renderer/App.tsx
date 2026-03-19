@@ -18,6 +18,7 @@ import { useAppStore } from './stores/app';
 import { flowToCurl } from './utils/curl';
 import { clearTrafficFlows, deleteTrafficFlow, exportHarFile, importHarFile, toggleProxyRecording } from './utils/app-actions';
 import { getNextSelectedFlowIdAfterDelete } from './utils/shortcuts';
+import { applyThemePreference, watchSystemTheme } from './utils/theme';
 
 declare global {
   interface Window {
@@ -81,7 +82,20 @@ function MainApp() {
   const removeFlow = useTrafficStore(s => s.removeFlow);
   const getFilteredFlows = useTrafficStore(s => s.getFilteredFlows);
   const { addRule } = useRulesStore();
-  const { proxyRunning, setProxyRunning, setNoCacheEnabled } = useAppStore();
+  const { proxyRunning, setProxyRunning, setNoCacheEnabled, theme } = useAppStore();
+
+  useEffect(() => {
+    const syncTheme = () => {
+      applyThemePreference(theme);
+    };
+
+    syncTheme();
+    if (theme !== 'system') {
+      return;
+    }
+
+    return watchSystemTheme(syncTheme);
+  }, [theme]);
 
   useEffect(() => {
     const api = window.proxyboy;
