@@ -105,7 +105,7 @@ export interface StatusCodeRange {
 
 // Rule types
 export type CaptureFilterMode = 'capture-all' | 'allow-list' | 'block-list';
-export type RuleType = 'breakpoint' | 'map-local' | 'allow-list' | 'block-list';
+export type RuleType = 'breakpoint' | 'map-local' | 'map-remote' | 'allow-list' | 'block-list';
 
 export interface Rule {
   id: string;
@@ -133,6 +133,12 @@ export interface MapLocalRule extends Rule {
   localFilePath: string;
   statusCode?: number;
   responseHeaders?: HttpHeaders;
+}
+
+export interface MapRemoteRule extends Rule {
+  type: 'map-remote';
+  destinationUrl: string;
+  preservePath?: boolean;
 }
 
 export interface AllowListRule extends Rule {

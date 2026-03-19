@@ -11,6 +11,7 @@ const navItems = [
   { id: 'traffic', label: 'Traffic', icon: '📡' },
   { id: 'breakpoints', label: 'Breakpoints', icon: '⏸' },
   { id: 'map-local', label: 'Map Local', icon: '📁' },
+  { id: 'map-remote', label: 'Map Remote', icon: '🌐' },
   { id: 'capture-rules', label: 'Capture Rules', icon: '🛡' },
   { id: 'settings', label: 'Settings', icon: '⚙' },
 ];

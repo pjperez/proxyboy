@@ -1,4 +1,4 @@
-import { HttpFlow, BreakpointRule, MapLocalRule, Rule, AllowListRule, BlockListRule, CaptureFilterMode } from '../../shared/types';
+import { HttpFlow, BreakpointRule, MapLocalRule, MapRemoteRule, Rule, AllowListRule, BlockListRule, CaptureFilterMode } from '../../shared/types';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -6,6 +6,7 @@ import * as os from 'os';
 export class Interceptor {
   private breakpointRules: BreakpointRule[] = [];
   private mapLocalRules: MapLocalRule[] = [];
+  private mapRemoteRules: MapRemoteRule[] = [];
   private allowListRules: AllowListRule[] = [];
   private blockListRules: BlockListRule[] = [];
   private captureMode: CaptureFilterMode = 'capture-all';
@@ -18,6 +19,7 @@ export class Interceptor {
   setRules(rules: Rule[]): void {
     this.breakpointRules = rules.filter((r): r is BreakpointRule => r.type === 'breakpoint' && r.enabled);
     this.mapLocalRules = rules.filter((r): r is MapLocalRule => r.type === 'map-local' && r.enabled);
+    this.mapRemoteRules = rules.filter((r): r is MapRemoteRule => r.type === 'map-remote' && r.enabled);
     this.allowListRules = rules.filter((r): r is AllowListRule => r.type === 'allow-list' && r.enabled);
     this.blockListRules = rules.filter((r): r is BlockListRule => r.type === 'block-list' && r.enabled);
     this.regexCache.clear();
@@ -128,6 +130,14 @@ export class Interceptor {
 
   getMapLocalRule(url: string, method: string): MapLocalRule | null {
     for (const rule of this.mapLocalRules) {
+      if (!this.matchesRule(rule, url, method)) continue;
+      return rule;
+    }
+    return null;
+  }
+
+  getMapRemoteRule(url: string, method: string): MapRemoteRule | null {
+    for (const rule of this.mapRemoteRules) {
       if (!this.matchesRule(rule, url, method)) continue;
       return rule;
     }
