@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, dialog, app } from 'electron';
+import { ipcMain, BrowserWindow, dialog, app, safeStorage } from 'electron';
 import * as path from 'path';
 import { IPC_CHANNELS } from '../../shared/constants';
 import { ProxyEngine } from '../proxy/engine';
@@ -8,6 +8,7 @@ import { replayFlowThroughProxy, sendComposedRequestThroughProxy } from '../prox
 import { setSystemProxy, clearSystemProxy, isSystemProxyEnabled } from '../utils/windows-proxy';
 import { ProxyState, Rule, HttpFlow, CaptureFilterMode, ComposerRequest } from '../../shared/types';
 import { normalizeThrottleSettings, type ThrottleSettings } from '../../shared/throttle';
+import { normalizeUpstreamProxySettings, type UpstreamProxySettings } from '../../shared/upstream-proxy';
 import { flowsToHar } from '../utils/har';
 import { randomUUID } from 'crypto';
 import { annotateGraphQLRequest } from '../../shared/graphql';
@@ -31,6 +32,52 @@ declare const MAIN_WINDOW_VITE_NAME: string;
 const NO_CACHE_SETTING_KEY = 'proxy:no-cache-enabled';
 const THROTTLE_SETTINGS_KEY = 'proxy:throttle-settings';
 const AUTO_UPDATE_ENABLED_KEY = 'app:auto-update-enabled';
+const UPSTREAM_PROXY_SETTINGS_KEY = 'proxy:upstream-settings';
+const UPSTREAM_PROXY_PASSWORD_KEY = 'proxy:upstream-settings-password';
+
+function serializeUpstreamProxySettings(settings: UpstreamProxySettings): string {
+  const { password: _password, ...persistedSettings } = settings;
+  return JSON.stringify(persistedSettings);
+}
+
+function persistUpstreamProxyPassword(password: string): void {
+  if (!password) {
+    setAppSetting(UPSTREAM_PROXY_PASSWORD_KEY, '');
+    return;
+  }
+
+  const encryptedPassword = safeStorage.encryptString(password).toString('base64');
+  setAppSetting(UPSTREAM_PROXY_PASSWORD_KEY, encryptedPassword);
+}
+
+function assertUpstreamProxyPasswordCanPersist(password: string): void {
+  if (password && !safeStorage.isEncryptionAvailable()) {
+    throw new Error('Secure credential storage is unavailable on this system.');
+  }
+}
+
+function hydrateUpstreamProxySettings(serializedSettings: string): UpstreamProxySettings {
+  const parsedSettings = normalizeUpstreamProxySettings(JSON.parse(serializedSettings));
+  const encryptedPassword = getAppSetting(UPSTREAM_PROXY_PASSWORD_KEY);
+
+  if (!encryptedPassword) {
+    return parsedSettings;
+  }
+
+  if (!safeStorage.isEncryptionAvailable()) {
+    console.error('Secure credential storage is unavailable; loading upstream proxy settings without a saved password.');
+    return {
+      ...parsedSettings,
+      enabled: false,
+      password: '',
+    };
+  }
+
+  return {
+    ...parsedSettings,
+    password: safeStorage.decryptString(Buffer.from(encryptedPassword, 'base64')),
+  };
+}
 
 export function registerIpcHandlers(
   mainWindow: BrowserWindow,
@@ -142,6 +189,22 @@ export function registerIpcHandlers(
     }
   });
 
+  ipcMain.handle(IPC_CHANNELS.PROXY_SET_UPSTREAM, async (_event, settings: UpstreamProxySettings) => {
+    try {
+      const normalizedSettings = normalizeUpstreamProxySettings(settings);
+      assertUpstreamProxyPasswordCanPersist(normalizedSettings.password);
+      setAppSetting(UPSTREAM_PROXY_SETTINGS_KEY, serializeUpstreamProxySettings(normalizedSettings));
+      persistUpstreamProxyPassword(normalizedSettings.password);
+      proxyEngine.setUpstreamProxySettings(normalizedSettings);
+      return {
+        success: true,
+        upstreamProxySettings: proxyEngine.getUpstreamProxySettings(),
+      };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
   ipcMain.handle(IPC_CHANNELS.PROXY_STATUS, async (): Promise<ProxyState> => {
     return {
       running: proxyEngine.isRunning(),
@@ -151,6 +214,7 @@ export function registerIpcHandlers(
       noCacheEnabled: proxyEngine.isNoCacheEnabled(),
       throttleSettings: proxyEngine.getThrottleSettings(),
       throttleProfile: proxyEngine.getThrottleProfile(),
+      upstreamProxySettings: proxyEngine.getUpstreamProxySettings(),
       totalRequests: proxyEngine.getFlowCount(),
       activeConnections: 0,
       sslEnabled: true,
@@ -283,6 +347,15 @@ export function registerIpcHandlers(
     }
   } catch (err) {
     console.error('Failed to load throttle settings from database:', err);
+  }
+
+  try {
+    const savedUpstreamProxySettings = getAppSetting(UPSTREAM_PROXY_SETTINGS_KEY);
+    if (savedUpstreamProxySettings) {
+      proxyEngine.setUpstreamProxySettings(hydrateUpstreamProxySettings(savedUpstreamProxySettings));
+    }
+  } catch (err) {
+    console.error('Failed to load upstream proxy settings from database:', err);
   }
 
   agentClient.setRuleManager({

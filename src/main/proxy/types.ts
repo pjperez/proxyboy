@@ -1,10 +1,12 @@
 import { HttpFlow, HttpRequest, HttpResponse } from '../../shared/types';
+import type { UpstreamProxySettings } from '../../shared/upstream-proxy';
 
 export interface ProxyEngineOptions {
   port: number;
   host: string;
   sslCaDir?: string;
   enableSsl: boolean;
+  upstreamProxySettings?: UpstreamProxySettings;
 }
 
 export interface ProxyEvents {

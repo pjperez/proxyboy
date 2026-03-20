@@ -1,4 +1,5 @@
 import type { ResolvedThrottleProfile, ThrottleSettings } from './throttle';
+import type { UpstreamProxySettings } from './upstream-proxy';
 
 // Core HTTP flow types
 export interface HttpHeaders {
@@ -79,6 +80,7 @@ export interface ProxyState {
   noCacheEnabled: boolean;
   throttleSettings: ThrottleSettings;
   throttleProfile: ResolvedThrottleProfile;
+  upstreamProxySettings: UpstreamProxySettings;
   totalRequests: number;
   activeConnections: number;
   sslEnabled: boolean;

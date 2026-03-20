@@ -9,6 +9,12 @@ import {
   resolveThrottleProfile,
   type ThrottleProfileId,
 } from '../../../shared/throttle';
+import {
+  DEFAULT_UPSTREAM_PROXY_SETTINGS,
+  normalizeUpstreamProxySettings,
+  type UpstreamProxySettings,
+  type UpstreamProxyType,
+} from '../../../shared/upstream-proxy';
 
 export default function SettingsPanel() {
   const {
@@ -35,6 +41,10 @@ export default function SettingsPanel() {
   const [dnsError, setDnsError] = useState<string | null>(null);
   const [throttleDraft, setThrottleDraft] = useState(() => throttleSettings.customProfile);
   const [throttleError, setThrottleError] = useState<string | null>(null);
+  const [upstreamProxyDraft, setUpstreamProxyDraft] = useState<UpstreamProxySettings>(DEFAULT_UPSTREAM_PROXY_SETTINGS);
+  const [upstreamBypassDraft, setUpstreamBypassDraft] = useState('');
+  const [upstreamApplied, setUpstreamApplied] = useState(false);
+  const [upstreamError, setUpstreamError] = useState<string | null>(null);
 
   useEffect(() => {
     window.proxyboy?.proxy.getCertStatus().then((status: { installed: boolean }) => {
@@ -47,6 +57,12 @@ export default function SettingsPanel() {
         setDnsMode('custom');
         setDnsServers(config.servers.join(', '));
       }
+    }).catch(() => {});
+
+    window.proxyboy?.proxy.getStatus().then((status: { upstreamProxySettings?: UpstreamProxySettings }) => {
+      const normalizedSettings = normalizeUpstreamProxySettings(status.upstreamProxySettings);
+      setUpstreamProxyDraft(normalizedSettings);
+      setUpstreamBypassDraft(normalizedSettings.bypassPatterns.join(', '));
     }).catch(() => {});
   }, []);
 
@@ -160,6 +176,36 @@ export default function SettingsPanel() {
     }
   };
 
+  const handleApplyUpstreamProxy = async () => {
+    const normalizedSettings = normalizeUpstreamProxySettings({
+      ...upstreamProxyDraft,
+      bypassPatterns: upstreamBypassDraft
+        .split(/[,\n]+/)
+        .map((pattern) => pattern.trim())
+        .filter((pattern) => pattern.length > 0),
+    });
+
+    setUpstreamApplied(false);
+    setUpstreamError(null);
+
+    if (normalizedSettings.enabled && !normalizedSettings.host) {
+      setUpstreamError('Enter an upstream proxy host before enabling proxy chaining.');
+      return;
+    }
+
+    const result = await window.proxyboy?.proxy.setUpstreamProxy(normalizedSettings);
+    if (result?.success) {
+      const nextSettings = normalizeUpstreamProxySettings(result.upstreamProxySettings);
+      setUpstreamProxyDraft(nextSettings);
+      setUpstreamBypassDraft(nextSettings.bypassPatterns.join(', '));
+      setUpstreamApplied(true);
+      setTimeout(() => setUpstreamApplied(false), 2000);
+      return;
+    }
+
+    setUpstreamError(result?.error || 'Failed to update the upstream proxy settings.');
+  };
+
   const resolvedTheme = resolveThemePreference(theme);
   const resolvedThrottleProfile = resolveThrottleProfile(throttleSettings);
 
@@ -243,6 +289,119 @@ export default function SettingsPanel() {
               <span className="text-xs text-pb-text-dim">Applies to all proxied traffic.</span>
               {throttleError && <span className="text-xs text-pb-error">{throttleError}</span>}
             </div>
+          </div>
+        </Row>
+        <Row label="Upstream proxy / chaining">
+          <div className="flex flex-col items-end gap-2">
+            <Toggle
+              checked={upstreamProxyDraft.enabled}
+              onChange={() => {
+                setUpstreamProxyDraft((current) => ({ ...current, enabled: !current.enabled }));
+                setUpstreamApplied(false);
+                setUpstreamError(null);
+              }}
+            />
+            <span className="text-xs text-pb-text-dim max-w-md text-right">
+              Route outbound requests through an HTTP or SOCKS5 proxy before they reach the origin server.
+            </span>
+          </div>
+        </Row>
+        <Row label="Proxy type">
+          <div className="flex gap-2">
+            {(['http', 'socks5'] as const).map((type) => (
+              <OptionButton
+                key={type}
+                label={type === 'http' ? 'HTTP' : 'SOCKS5'}
+                active={upstreamProxyDraft.type === type}
+                onClick={() => {
+                  setUpstreamProxyDraft((current) => ({ ...current, type: type as UpstreamProxyType }));
+                  setUpstreamApplied(false);
+                  setUpstreamError(null);
+                }}
+              />
+            ))}
+          </div>
+        </Row>
+        <Row label="Proxy endpoint">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={upstreamProxyDraft.host}
+              onChange={(event) => {
+                setUpstreamProxyDraft((current) => ({ ...current, host: event.target.value }));
+                setUpstreamApplied(false);
+                setUpstreamError(null);
+              }}
+              placeholder="proxy.example.com"
+              className="bg-pb-bg border border-pb-border rounded px-3 py-1.5 text-sm text-pb-text font-mono w-56 focus:outline-none focus:border-pb-accent"
+            />
+            <input
+              type="number"
+              value={upstreamProxyDraft.port}
+              onChange={(event) => {
+                setUpstreamProxyDraft((current) => normalizeUpstreamProxySettings({
+                  ...current,
+                  port: Number(event.target.value),
+                }));
+                setUpstreamApplied(false);
+                setUpstreamError(null);
+              }}
+              className="bg-pb-bg border border-pb-border rounded px-3 py-1.5 text-sm text-pb-text font-mono w-24 focus:outline-none focus:border-pb-accent"
+            />
+          </div>
+        </Row>
+        <Row label="Authentication">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={upstreamProxyDraft.username}
+              onChange={(event) => {
+                setUpstreamProxyDraft((current) => ({ ...current, username: event.target.value }));
+                setUpstreamApplied(false);
+                setUpstreamError(null);
+              }}
+              placeholder="Username (optional)"
+              className="bg-pb-bg border border-pb-border rounded px-3 py-1.5 text-sm text-pb-text w-44 focus:outline-none focus:border-pb-accent"
+            />
+            <input
+              type="password"
+              value={upstreamProxyDraft.password}
+              onChange={(event) => {
+                setUpstreamProxyDraft((current) => ({ ...current, password: event.target.value }));
+                setUpstreamApplied(false);
+                setUpstreamError(null);
+              }}
+              placeholder="Password (optional)"
+              className="bg-pb-bg border border-pb-border rounded px-3 py-1.5 text-sm text-pb-text w-44 focus:outline-none focus:border-pb-accent"
+            />
+          </div>
+        </Row>
+        <Row label="Bypass patterns">
+          <div className="flex flex-col items-end gap-2">
+            <textarea
+              value={upstreamBypassDraft}
+              onChange={(event) => {
+                setUpstreamBypassDraft(event.target.value);
+                setUpstreamApplied(false);
+                setUpstreamError(null);
+              }}
+              rows={3}
+              placeholder="localhost, 127.0.0.1, *.internal.example"
+              className="bg-pb-bg border border-pb-border rounded px-3 py-2 text-sm text-pb-text font-mono w-80 resize-y focus:outline-none focus:border-pb-accent"
+            />
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => void handleApplyUpstreamProxy()}
+                className="px-3 py-1.5 rounded text-sm font-medium bg-pb-accent text-pb-bg hover:bg-pb-accent/80"
+              >
+                Apply Upstream Proxy
+              </button>
+              {upstreamApplied && <span className="text-xs text-pb-success">✓</span>}
+              {upstreamError && <span className="text-xs text-pb-error">{upstreamError}</span>}
+            </div>
+            <span className="text-xs text-pb-text-dim max-w-md text-right">
+              Match hosts or full URLs with glob patterns. Matching requests connect directly instead of using the upstream proxy.
+            </span>
           </div>
         </Row>
       </Section>
