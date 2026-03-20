@@ -20,6 +20,8 @@ describe('normalizeUpstreamProxySettings', () => {
       port: 1080,
       username: 'user',
       password: 'secret',
+      hasSavedPassword: false,
+      passwordChanged: false,
       bypassPatterns: ['localhost', '*.internal'],
     });
   });

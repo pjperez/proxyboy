@@ -7,6 +7,8 @@ export interface UpstreamProxySettings {
   port: number;
   username: string;
   password: string;
+  hasSavedPassword?: boolean;
+  passwordChanged?: boolean;
   bypassPatterns: string[];
 }
 
@@ -17,6 +19,8 @@ export const DEFAULT_UPSTREAM_PROXY_SETTINGS: UpstreamProxySettings = {
   port: 8080,
   username: '',
   password: '',
+  hasSavedPassword: false,
+  passwordChanged: false,
   bypassPatterns: [],
 };
 
@@ -58,6 +62,8 @@ export function normalizeUpstreamProxySettings(
     port: normalizePort(settings?.port, DEFAULT_UPSTREAM_PROXY_SETTINGS.port),
     username: normalizeText(settings?.username),
     password: typeof settings?.password === 'string' ? settings.password : '',
+    hasSavedPassword: Boolean(settings?.hasSavedPassword),
+    passwordChanged: Boolean(settings?.passwordChanged),
     bypassPatterns: normalizeBypassPatterns(settings?.bypassPatterns),
   };
 }

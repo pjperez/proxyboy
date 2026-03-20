@@ -401,18 +401,24 @@ export default function SettingsPanel() {
               placeholder="Username (optional)"
               className="bg-pb-bg border border-pb-border rounded px-3 py-1.5 text-sm text-pb-text w-44 focus:outline-none focus:border-pb-accent"
             />
-            <input
-              type="password"
-              value={upstreamProxyDraft.password}
-              onChange={(event) => {
-                setUpstreamProxyDraft((current) => ({ ...current, password: event.target.value }));
-                setUpstreamApplied(false);
-                setUpstreamError(null);
-              }}
-              placeholder="Password (optional)"
-              className="bg-pb-bg border border-pb-border rounded px-3 py-1.5 text-sm text-pb-text w-44 focus:outline-none focus:border-pb-accent"
-            />
-          </div>
+              <input
+                type="password"
+                value={upstreamProxyDraft.password}
+                onChange={(event) => {
+                  setUpstreamProxyDraft((current) => ({
+                    ...current,
+                    password: event.target.value,
+                    passwordChanged: true,
+                  }));
+                  setUpstreamApplied(false);
+                  setUpstreamError(null);
+                }}
+                placeholder={upstreamProxyDraft.hasSavedPassword && !upstreamProxyDraft.passwordChanged
+                  ? 'Saved password'
+                  : 'Password (optional)'}
+                className="bg-pb-bg border border-pb-border rounded px-3 py-1.5 text-sm text-pb-text w-44 focus:outline-none focus:border-pb-accent"
+              />
+            </div>
         </Row>
         <Row label="Bypass patterns">
           <div className="flex flex-col items-end gap-2">

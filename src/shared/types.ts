@@ -72,6 +72,16 @@ export interface HttpFlow {
   sseEvents?: SseEvent[];
 }
 
+export interface TrafficFlowUpdate {
+  id: string;
+  streamKind?: 'websocket' | 'sse';
+  streamOpen?: boolean;
+  tags?: string[];
+  notes?: string;
+  appendWebSocketFrames?: WebSocketFrame[];
+  appendSseEvents?: SseEvent[];
+}
+
 export interface FlowTiming {
   start: number;
   dnsStart?: number;

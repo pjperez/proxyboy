@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import type { HttpRequest, HttpResponse, ScriptRule } from '../../shared/types';
-import { executeScriptRule } from './runner';
+import { clearCompiledScriptCache, executeScriptRule, getCompiledScriptCacheSize } from './runner';
 
 function createScriptRule(overrides?: Partial<ScriptRule>): ScriptRule {
   return {
@@ -47,6 +47,10 @@ function createResponse(overrides?: Partial<HttpResponse>): HttpResponse {
     ...overrides,
   };
 }
+
+afterEach(() => {
+  clearCompiledScriptCache();
+});
 
 describe('executeScriptRule', () => {
   it('can modify request headers and body', () => {
@@ -120,5 +124,34 @@ describe('executeScriptRule', () => {
       }),
       createRequest(),
     )).toThrow(/Code generation from strings disallowed/i);
+  });
+
+  it('reuses compiled vm scripts for repeated executions of the same rule', () => {
+    const rule = createScriptRule({
+      code: `request.headers['x-cache-hit'] = 'yes';`,
+    });
+
+    executeScriptRule(rule, createRequest());
+    executeScriptRule(rule, createRequest());
+
+    expect(getCompiledScriptCacheSize()).toBe(1);
+  });
+
+  it('recompiles scripts when the rule changes', () => {
+    const originalRule = createScriptRule({
+      id: 'cache-rule',
+      updatedAt: 1,
+      code: `request.headers['x-cache-version'] = '1';`,
+    });
+    const updatedRule = createScriptRule({
+      id: 'cache-rule',
+      updatedAt: 2,
+      code: `request.headers['x-cache-version'] = '2';`,
+    });
+
+    executeScriptRule(originalRule, createRequest());
+    executeScriptRule(updatedRule, createRequest());
+
+    expect(getCompiledScriptCacheSize()).toBe(2);
   });
 });

@@ -5,8 +5,8 @@ import * as http from 'http';
 import * as https from 'https';
 import { randomUUID } from 'crypto';
 import { gunzipSync, inflateSync, brotliDecompressSync } from 'zlib';
-import { HttpFlow, HttpRequest, HttpResponse } from '../../shared/types';
-import { INTERNAL_COMPOSER_HEADER, INTERNAL_REPLAY_HEADER } from '../../shared/constants';
+import { HttpFlow, HttpRequest, HttpResponse, TrafficFlowUpdate } from '../../shared/types';
+import { INTERNAL_COMPOSER_HEADER, INTERNAL_REPLAY_HEADER, MAX_STREAM_ITEMS } from '../../shared/constants';
 import { CertificateManager } from './certificate';
 import { Interceptor } from './interceptor';
 import { DnsResolverService } from './dns-resolver';
@@ -44,16 +44,20 @@ import {
 
 const MAX_FLOWS = 10000;
 const MAX_BODY_SIZE = 2 * 1024 * 1024; // 2 MB
-const MAX_STREAM_ITEMS = 500;
 
-function decompressBody(body: Buffer, encoding?: string): Buffer {
+function decompressBody(body: Buffer, encoding?: string | string[]): Buffer {
   // Try explicit content-encoding first
   if (encoding) {
-    const enc = encoding.toLowerCase().trim();
+    const enc = Array.isArray(encoding) ? encoding[0] : encoding;
+    if (!enc) {
+      return body;
+    }
+
+    const normalizedEncoding = enc.toLowerCase().trim();
     try {
-      if (enc === 'gzip' || enc === 'x-gzip') return gunzipSync(body);
-      if (enc === 'br') return brotliDecompressSync(body);
-      if (enc === 'deflate') return inflateSync(body);
+      if (normalizedEncoding === 'gzip' || normalizedEncoding === 'x-gzip') return gunzipSync(body);
+      if (normalizedEncoding === 'br') return brotliDecompressSync(body);
+      if (normalizedEncoding === 'deflate') return inflateSync(body);
     } catch {
       // Fall through to magic-byte detection
     }
@@ -286,9 +290,9 @@ export class ProxyEngine extends EventEmitter {
     this.flows.clear();
   }
 
-  private emitFlowUpdate(flow: HttpFlow): void {
+  private emitFlowUpdate(update: TrafficFlowUpdate, flow: HttpFlow): void {
     this.flows.set(flow.id, flow);
-    this.emit('flow:response', flow);
+    this.emit('flow:response', update);
   }
 
   private createWebSocketFlow(ctx: any): HttpFlow | null {
@@ -345,14 +349,21 @@ export class ProxyEngine extends EventEmitter {
     return flow;
   }
 
-  private capStreamItems<T>(items: T[], flow: HttpFlow, tag: string): T[] {
-    if (items.length <= MAX_STREAM_ITEMS) {
-      return items;
+  private appendCappedStreamItems<T>(items: T[] | undefined, nextItems: T[], flow: HttpFlow, tag: string): T[] {
+    const target = items ?? [];
+    for (const item of nextItems) {
+      target.push(item);
     }
+    if (target.length <= MAX_STREAM_ITEMS) {
+      return target;
+    }
+
+    const overflow = target.length - MAX_STREAM_ITEMS;
+    target.splice(0, overflow);
     if (!flow.tags.includes(tag)) {
       flow.tags.push(tag);
     }
-    return items.slice(items.length - MAX_STREAM_ITEMS);
+    return target;
   }
 
   private markFlowAsSslPinningSuspected(flowId: string | undefined, error: unknown): void {
@@ -482,7 +493,7 @@ export class ProxyEngine extends EventEmitter {
       const flow = typeof flowId === 'string' ? this.flows.get(flowId) : undefined;
       if (flow) {
         const nextFrame = createWebSocketFrame(type, fromServer, message);
-        flow.websocketFrames = this.capStreamItems([...(flow.websocketFrames ?? []), nextFrame], flow, 'websocket-frames-capped');
+        flow.websocketFrames = this.appendCappedStreamItems(flow.websocketFrames, [nextFrame], flow, 'websocket-frames-capped');
         flow.streamKind = 'websocket';
         flow.streamOpen = true;
         if (flow.response) {
@@ -491,7 +502,13 @@ export class ProxyEngine extends EventEmitter {
         if (flow.timing && flow.timing.firstByte == null) {
           flow.timing.firstByte = Date.now();
         }
-        this.emitFlowUpdate(flow);
+        this.emitFlowUpdate({
+          id: flow.id,
+          streamKind: flow.streamKind,
+          streamOpen: flow.streamOpen,
+          tags: [...flow.tags],
+          appendWebSocketFrames: [nextFrame],
+        }, flow);
       }
       callback(null, message, flags);
     });
@@ -698,24 +715,30 @@ export class ProxyEngine extends EventEmitter {
       let mapRemoteNote: string | undefined;
       const mapRemoteRule = this.interceptor.getMapRemoteRule(originalRequestUrl, request.method);
       if (mapRemoteRule) {
-        const targetUrl = resolveMapRemoteUrl(mapRemoteRule, originalRequestUrl);
+        try {
+          const targetUrl = resolveMapRemoteUrl(mapRemoteRule, originalRequestUrl);
 
-        request.url = targetUrl.toString();
-        request.host = targetUrl.host;
-        request.path = `${targetUrl.pathname}${targetUrl.search}`;
-        request.headers.host = targetUrl.host;
-        ctx.clientToProxyRequest.headers.host = targetUrl.host;
-        ctx.clientToProxyRequest.url = request.path;
+          request.url = targetUrl.toString();
+          request.host = targetUrl.host;
+          request.path = `${targetUrl.pathname}${targetUrl.search}`;
+          request.headers.host = targetUrl.host;
+          ctx.clientToProxyRequest.headers.host = targetUrl.host;
+          ctx.clientToProxyRequest.url = request.path;
 
-        if (ctx.proxyToServerRequestOptions) {
-          ctx.proxyToServerRequestOptions.host = targetUrl.hostname;
-          ctx.proxyToServerRequestOptions.port = targetUrl.port || (targetUrl.protocol === 'https:' ? 443 : 80);
-          ctx.proxyToServerRequestOptions.path = request.path;
-          ctx.proxyToServerRequestOptions.headers.host = targetUrl.host;
+          if (ctx.proxyToServerRequestOptions) {
+            ctx.proxyToServerRequestOptions.host = targetUrl.hostname;
+            ctx.proxyToServerRequestOptions.port = targetUrl.port || (targetUrl.protocol === 'https:' ? 443 : 80);
+            ctx.proxyToServerRequestOptions.path = request.path;
+            ctx.proxyToServerRequestOptions.headers.host = targetUrl.host;
+          }
+
+          initialTags.push('map-remote');
+          mapRemoteNote = `Map Remote redirected ${originalRequestUrl} -> ${request.url}`;
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          initialTags.push('map-remote-invalid');
+          mapRemoteNote = `Map Remote rule "${mapRemoteRule.name}" was ignored because its destination URL is invalid: ${message}`;
         }
-
-        initialTags.push('map-remote');
-        mapRemoteNote = `Map Remote redirected ${originalRequestUrl} -> ${request.url}`;
       }
 
       const flow: HttpFlow = {
@@ -817,9 +840,11 @@ export class ProxyEngine extends EventEmitter {
       const responseChunks: Buffer[] = [];
       let firstByteRecorded = false;
       let sseRemainder = '';
+      let responseContentEncoding: string | string[] | undefined;
 
       ctx.onResponse((ctx: any, cb: () => void) => {
         if (flow.timing) flow.timing.responseStart = Date.now();
+        responseContentEncoding = ctx.serverToProxyResponse?.headers?.['content-encoding'];
         if (this.noCacheEnabled && ctx.serverToProxyResponse?.headers) {
           applyNoCacheToResponseHeaders(ctx.serverToProxyResponse.headers as Record<string, string | string[]>);
         }
@@ -830,7 +855,12 @@ export class ProxyEngine extends EventEmitter {
           if (!flow.tags.includes('sse')) {
             flow.tags.push('sse');
           }
-          this.emitFlowUpdate(flow);
+          this.emitFlowUpdate({
+            id: flow.id,
+            streamKind: flow.streamKind,
+            streamOpen: flow.streamOpen,
+            tags: [...flow.tags],
+          }, flow);
         }
         if (responseScripts.length > 0 && ctx.serverToProxyResponse) {
           let previewResponse: HttpResponse = {
@@ -866,7 +896,6 @@ export class ProxyEngine extends EventEmitter {
             ctx.serverToProxyResponse.headers as Record<string, string | string[]>,
             previewResponse.headers as Record<string, string | string[]>,
           );
-          delete (ctx.serverToProxyResponse.headers as Record<string, string | string[]>)['content-encoding'];
           delete (ctx.serverToProxyResponse.headers as Record<string, string | string[]>)['content-length'];
           delete (ctx.serverToProxyResponse.headers as Record<string, string | string[]>)['transfer-encoding'];
         }
@@ -903,9 +932,15 @@ export class ProxyEngine extends EventEmitter {
           const parsed = parseSseChunk(sseRemainder, chunk);
           sseRemainder = parsed.remainder;
           if (parsed.events.length > 0) {
-            flow.sseEvents = this.capStreamItems([...(flow.sseEvents ?? []), ...parsed.events], flow, 'sse-events-capped');
+            flow.sseEvents = this.appendCappedStreamItems(flow.sseEvents, parsed.events, flow, 'sse-events-capped');
             flow.streamOpen = true;
-            this.emitFlowUpdate(flow);
+            this.emitFlowUpdate({
+              id: flow.id,
+              streamKind: flow.streamKind,
+              streamOpen: flow.streamOpen,
+              tags: [...flow.tags],
+              appendSseEvents: parsed.events,
+            }, flow);
           }
         } else {
           responseChunks.push(chunk);
@@ -943,13 +978,13 @@ export class ProxyEngine extends EventEmitter {
         if (flow.streamKind === 'sse') {
           const trailingEvents = flushSseBuffer(sseRemainder);
           if (trailingEvents.length > 0) {
-            flow.sseEvents = this.capStreamItems([...(flow.sseEvents ?? []), ...trailingEvents], flow, 'sse-events-capped');
+            flow.sseEvents = this.appendCappedStreamItems(flow.sseEvents, trailingEvents, flow, 'sse-events-capped');
           }
           flow.streamOpen = false;
         }
 
         const rawBody = responseChunks.length > 0 ? Buffer.concat(responseChunks) : undefined;
-        let responseBody = rawBody ? decompressBody(rawBody, ctx.serverToProxyResponse?.headers?.['content-encoding']) : undefined;
+        let responseBody = rawBody ? decompressBody(rawBody, responseContentEncoding) : undefined;
 
         // Body size cap (2 MB)
         if (responseBody && responseBody.length > MAX_BODY_SIZE) {

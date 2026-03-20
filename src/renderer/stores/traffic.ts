@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import type { HttpFlow, FilterCriteria } from '../../shared/types';
+import { MAX_STREAM_ITEMS } from '../../shared/constants';
+import type { HttpFlow, FilterCriteria, TrafficFlowUpdate, WebSocketFrame, SseEvent } from '../../shared/types';
 
 const MAX_RENDERER_FLOWS = 5000;
 
@@ -10,7 +11,7 @@ interface TrafficState {
   compareTargetFlowId: string | null;
   setFlows: (flows: HttpFlow[]) => void;
   addFlow: (flow: HttpFlow) => void;
-  updateFlow: (flow: HttpFlow) => void;
+  updateFlow: (flow: HttpFlow | TrafficFlowUpdate) => void;
   removeFlow: (id: string) => void;
   clearFlows: () => void;
   setFilter: (filter: FilterCriteria) => void;
@@ -58,6 +59,44 @@ function getSearchableStreamContent(flow: HttpFlow): string {
     .map((event) => `${event.event || ''}\n${event.data}`.toLowerCase())
     .join('\n');
   return `${websocketContent}\n${sseContent}`;
+}
+
+function appendCappedStreamItems<T>(
+  currentItems: T[] | undefined,
+  nextItems: T[] | undefined,
+): T[] | undefined {
+  if (!nextItems || nextItems.length === 0) {
+    return currentItems;
+  }
+
+  const merged = [...(currentItems ?? []), ...nextItems];
+  if (merged.length <= MAX_STREAM_ITEMS) {
+    return merged;
+  }
+
+  return merged.slice(merged.length - MAX_STREAM_ITEMS);
+}
+
+function isFlowPatch(flow: HttpFlow | TrafficFlowUpdate): flow is TrafficFlowUpdate {
+  return !('request' in flow);
+}
+
+function applyFlowPatch(currentFlow: HttpFlow, patch: TrafficFlowUpdate): HttpFlow {
+  return {
+    ...currentFlow,
+    streamKind: patch.streamKind ?? currentFlow.streamKind,
+    streamOpen: patch.streamOpen ?? currentFlow.streamOpen,
+    tags: patch.tags ? [...patch.tags] : currentFlow.tags,
+    notes: patch.notes ?? currentFlow.notes,
+    websocketFrames: appendCappedStreamItems<WebSocketFrame>(
+      currentFlow.websocketFrames,
+      patch.appendWebSocketFrames,
+    ),
+    sseEvents: appendCappedStreamItems<SseEvent>(
+      currentFlow.sseEvents,
+      patch.appendSseEvents,
+    ),
+  };
 }
 
 export function matchesFlowFilter(flow: HttpFlow, filter: FilterCriteria): boolean {
@@ -162,10 +201,13 @@ export const useTrafficStore = create<TrafficState>((set, get) => ({
     set((state) => {
       const index = state.flows.findIndex((f) => f.id === flow.id);
       if (index === -1) {
+        if (isFlowPatch(flow)) {
+          return {};
+        }
         return { flows: [...state.flows, flow] };
       }
       const next = [...state.flows];
-      next[index] = flow;
+      next[index] = isFlowPatch(flow) ? applyFlowPatch(next[index], flow) : flow;
       return { flows: next };
     }),
 

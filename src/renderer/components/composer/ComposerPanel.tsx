@@ -167,6 +167,12 @@ export default function ComposerPanel({ draft = null }: Props) {
     }
 
     setUrl(normalizedUrl);
+    if (result.captured === false) {
+      setSending(false);
+      setComposerRequestId(null);
+      setError('Request sent, but the current capture rules prevented it from being recorded.');
+      return;
+    }
     setComposerRequestId(result.composerRequestId);
   };
 

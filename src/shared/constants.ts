@@ -79,3 +79,4 @@ export const APP_NAME = 'ProxyBoy';
 export const APP_VERSION = '1.0.0';
 export const INTERNAL_REPLAY_HEADER = 'x-proxyboy-replay';
 export const INTERNAL_COMPOSER_HEADER = 'x-proxyboy-composer-id';
+export const MAX_STREAM_ITEMS = 500;

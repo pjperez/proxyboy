@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../shared/constants';
-import type { ProxyState, HttpFlow, Rule, FilterCriteria, CaptureFilterMode, ComposerRequest, AppUpdateState, ScriptRule, ScriptTestResult } from '../shared/types';
+import type { ProxyState, HttpFlow, Rule, FilterCriteria, CaptureFilterMode, ComposerRequest, AppUpdateState, ScriptRule, ScriptTestResult, TrafficFlowUpdate } from '../shared/types';
 import type { ThrottleSettings } from '../shared/throttle';
 import type { UpstreamProxySettings } from '../shared/upstream-proxy';
 import type { ProtobufDecodeRequest, ProtobufSettings } from '../shared/protobuf';
@@ -28,7 +28,7 @@ const api = {
     clear: () => ipcRenderer.invoke(IPC_CHANNELS.TRAFFIC_CLEAR),
     delete: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TRAFFIC_DELETE, id),
     repeat: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TRAFFIC_REPEAT, id),
-    compose: (request: ComposerRequest): Promise<{ success: boolean; composerRequestId?: string; error?: string }> =>
+    compose: (request: ComposerRequest): Promise<{ success: boolean; composerRequestId?: string; captured?: boolean; error?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.TRAFFIC_COMPOSE, request),
     onNewFlow: (callback: (flow: HttpFlow) => void) => {
       const handler = (_event: any, flow: HttpFlow) => callback(flow);
@@ -40,8 +40,8 @@ const api = {
       ipcRenderer.on(IPC_CHANNELS.TRAFFIC_FLOW_COMPLETE, handler);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.TRAFFIC_FLOW_COMPLETE, handler);
     },
-    onFlowUpdated: (callback: (flow: HttpFlow) => void) => {
-      const handler = (_event: any, flow: HttpFlow) => callback(flow);
+    onFlowUpdated: (callback: (flow: TrafficFlowUpdate) => void) => {
+      const handler = (_event: any, flow: TrafficFlowUpdate) => callback(flow);
       ipcRenderer.on(IPC_CHANNELS.TRAFFIC_FLOW_UPDATED, handler);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.TRAFFIC_FLOW_UPDATED, handler);
     },

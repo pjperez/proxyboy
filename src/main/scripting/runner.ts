@@ -36,6 +36,41 @@ export interface ScriptExecutionResult {
 }
 
 const SCRIPT_TIMEOUT_MS = 1000;
+const MAX_COMPILED_SCRIPT_CACHE_SIZE = 128;
+const compiledScriptCache = new Map<string, vm.Script>();
+
+function getCompiledScriptCacheKey(rule: ScriptRule): string {
+  return `${rule.id}:${rule.updatedAt}:${rule.phase}:${rule.code}`;
+}
+
+function getCompiledScript(rule: ScriptRule): vm.Script {
+  const cacheKey = getCompiledScriptCacheKey(rule);
+  const cachedScript = compiledScriptCache.get(cacheKey);
+  if (cachedScript) {
+    compiledScriptCache.delete(cacheKey);
+    compiledScriptCache.set(cacheKey, cachedScript);
+    return cachedScript;
+  }
+
+  const compiledScript = new vm.Script(`"use strict";\n${rule.code}`);
+  compiledScriptCache.set(cacheKey, compiledScript);
+  if (compiledScriptCache.size > MAX_COMPILED_SCRIPT_CACHE_SIZE) {
+    const oldestKey = compiledScriptCache.keys().next().value;
+    if (oldestKey) {
+      compiledScriptCache.delete(oldestKey);
+    }
+  }
+
+  return compiledScript;
+}
+
+export function clearCompiledScriptCache(): void {
+  compiledScriptCache.clear();
+}
+
+export function getCompiledScriptCacheSize(): number {
+  return compiledScriptCache.size;
+}
 
 function cloneHeaders(headers: HttpHeaders): HttpHeaders {
   return Object.assign(Object.create(null), Object.fromEntries(
@@ -246,7 +281,7 @@ export function executeScriptRule(
     },
   });
 
-  const script = new vm.Script(`"use strict";\n${rule.code}`);
+  const script = getCompiledScript(rule);
   script.runInContext(context, { timeout: SCRIPT_TIMEOUT_MS });
 
   const nextRequest = toRuntimeRequest(originalRequest, mutableRequest);

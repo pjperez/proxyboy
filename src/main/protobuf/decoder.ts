@@ -1,5 +1,7 @@
+import * as fs from 'fs';
 import * as protobuf from 'protobufjs';
 import {
+  DEFAULT_PROTOBUF_SETTINGS,
   isGrpcContentType,
   isProtobufContentType,
   type ProtobufDecodeRequest,
@@ -22,34 +24,150 @@ interface DecodeContext {
   schemaTypeName?: string;
 }
 
-let cachedSchemaKey: string | null = null;
-let cachedRoot: protobuf.Root | null = null;
-
-function getSchemaRoot(settings: ProtobufSettings): protobuf.Root | null {
-  const schemaKey = settings.protoFilePaths.join('|');
-  if (!schemaKey) {
-    cachedSchemaKey = null;
-    cachedRoot = null;
-    return null;
-  }
-
-  if (cachedSchemaKey === schemaKey && cachedRoot) {
-    return cachedRoot;
-  }
-
-  cachedRoot = protobuf.loadSync(settings.protoFilePaths);
-  cachedSchemaKey = schemaKey;
-  return cachedRoot;
+interface DecoderDependencies {
+  loadSchemaFiles: (filePaths: string[]) => Promise<protobuf.Root>;
+  watchFile: (filePath: string, listener: fs.WatchListener<string>) => fs.FSWatcher;
 }
 
-export function validateProtobufSettings(settings: ProtobufSettings): void {
-  if (settings.protoFilePaths.length === 0) {
-    cachedSchemaKey = null;
-    cachedRoot = null;
+const defaultDecoderDependencies: DecoderDependencies = {
+  loadSchemaFiles: (filePaths) => protobuf.load(filePaths),
+  watchFile: (filePath, listener) => fs.watch(filePath, { persistent: false }, listener),
+};
+
+let cachedSchemaKey: string | null = null;
+let cachedRoot: protobuf.Root | null = null;
+let cachedLoadPromise: Promise<void> | null = null;
+let loadGeneration = 0;
+let watchedSchemaKey: string | null = null;
+let watchedSchemaSettings: ProtobufSettings = DEFAULT_PROTOBUF_SETTINGS;
+let schemaWatchers: fs.FSWatcher[] = [];
+let decoderDependencies: DecoderDependencies = defaultDecoderDependencies;
+
+export function setDecoderDependenciesForTests(overrides: Partial<DecoderDependencies>): void {
+  decoderDependencies = {
+    ...defaultDecoderDependencies,
+    ...overrides,
+  };
+}
+
+export function resetDecoderDependenciesForTests(): void {
+  decoderDependencies = defaultDecoderDependencies;
+}
+
+function getSchemaKey(settings: ProtobufSettings): string {
+  return settings.protoFilePaths.join('|');
+}
+
+function closeSchemaWatchers(): void {
+  for (const watcher of schemaWatchers) {
+    watcher.close();
+  }
+  schemaWatchers = [];
+  watchedSchemaKey = null;
+}
+
+function invalidateSchemaLoad(schemaKey: string | null): void {
+  loadGeneration += 1;
+  cachedSchemaKey = schemaKey;
+  cachedRoot = null;
+  cachedLoadPromise = null;
+}
+
+function resetSchemaCache(): void {
+  invalidateSchemaLoad(null);
+  watchedSchemaSettings = DEFAULT_PROTOBUF_SETTINGS;
+  closeSchemaWatchers();
+}
+
+function watchSchemaFiles(settings: ProtobufSettings): void {
+  const schemaKey = getSchemaKey(settings);
+  if (!schemaKey || watchedSchemaKey === schemaKey) {
     return;
   }
 
-  getSchemaRoot(settings);
+  closeSchemaWatchers();
+  watchedSchemaKey = schemaKey;
+  watchedSchemaSettings = settings;
+  schemaWatchers = settings.protoFilePaths.map((filePath) => {
+    const watcher = decoderDependencies.watchFile(filePath, () => {
+      if (cachedSchemaKey !== schemaKey) {
+        return;
+      }
+
+      invalidateSchemaLoad(schemaKey);
+      void validateProtobufSettings(watchedSchemaSettings).catch((error) => {
+        console.error('Failed to reload protobuf schema files:', error);
+      });
+    });
+    watcher.on('error', (error) => {
+      console.error(`Failed to watch protobuf schema file "${filePath}":`, error);
+      invalidateSchemaLoad(schemaKey);
+      closeSchemaWatchers();
+    });
+    return watcher;
+  });
+}
+
+async function ensureSchemaRootLoaded(settings: ProtobufSettings): Promise<void> {
+  const schemaKey = getSchemaKey(settings);
+  if (!schemaKey) {
+    resetSchemaCache();
+    return;
+  }
+
+  if (cachedSchemaKey === schemaKey && cachedRoot) {
+    watchSchemaFiles(settings);
+    return;
+  }
+
+  if (cachedSchemaKey === schemaKey && cachedLoadPromise) {
+    await cachedLoadPromise;
+    return;
+  }
+
+  loadGeneration += 1;
+  const currentLoadGeneration = loadGeneration;
+  cachedSchemaKey = schemaKey;
+  cachedRoot = null;
+  cachedLoadPromise = decoderDependencies.loadSchemaFiles(settings.protoFilePaths)
+    .then((root) => {
+      if (cachedSchemaKey === schemaKey && loadGeneration === currentLoadGeneration) {
+        cachedRoot = root;
+        watchSchemaFiles(settings);
+      }
+    })
+    .catch((error) => {
+      if (cachedSchemaKey === schemaKey && loadGeneration === currentLoadGeneration) {
+        cachedRoot = null;
+      }
+      throw error;
+    })
+    .finally(() => {
+      if (cachedSchemaKey === schemaKey && loadGeneration === currentLoadGeneration) {
+        cachedLoadPromise = null;
+      }
+    });
+
+  await cachedLoadPromise;
+}
+
+function getSchemaRoot(settings: ProtobufSettings): protobuf.Root | null {
+  const schemaKey = getSchemaKey(settings);
+  if (!schemaKey) {
+    resetSchemaCache();
+    return null;
+  }
+
+  return cachedSchemaKey === schemaKey ? cachedRoot : null;
+}
+
+export async function validateProtobufSettings(settings: ProtobufSettings): Promise<void> {
+  if (settings.protoFilePaths.length === 0) {
+    resetSchemaCache();
+    return;
+  }
+
+  await ensureSchemaRootLoaded(settings);
 }
 
 function decodeBodyBuffer(body: string, isBase64: boolean): Buffer {

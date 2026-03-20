@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { matchesFlowFilter, useTrafficStore } from './traffic';
 import type { HttpFlow } from '../../shared/types';
+import { MAX_STREAM_ITEMS } from '../../shared/constants';
 
 interface FlowOverrides extends Omit<Partial<HttpFlow>, 'request' | 'response'> {
   request?: Partial<HttpFlow['request']>;
@@ -170,6 +171,88 @@ describe('useTrafficStore GraphQL filtering', () => {
     useTrafficStore.getState().setFilter({ graphqlOperationName: 'viewer' });
 
     expect(useTrafficStore.getState().getFilteredFlows().map((flow) => flow.id)).toEqual(['viewer']);
+  });
+});
+
+describe('useTrafficStore flow updates', () => {
+  beforeEach(() => {
+    useTrafficStore.setState({ flows: [], filter: {}, markedFlowId: null, compareTargetFlowId: null });
+  });
+
+  it('appends stream patches without replacing the whole flow', () => {
+    useTrafficStore.getState().setFlows([
+      createFlow({
+        id: 'stream-1',
+        streamKind: 'websocket',
+        streamOpen: true,
+        websocketFrames: [
+          {
+            id: 'frame-1',
+            timestamp: 1,
+            direction: 'client-to-server',
+            frameType: 'message',
+            body: 'first',
+            byteLength: 5,
+          },
+        ],
+      }),
+    ]);
+
+    useTrafficStore.getState().updateFlow({
+      id: 'stream-1',
+      streamOpen: true,
+      appendWebSocketFrames: [
+        {
+          id: 'frame-2',
+          timestamp: 2,
+          direction: 'server-to-client',
+          frameType: 'message',
+          body: 'second',
+          byteLength: 6,
+        },
+      ],
+    });
+
+    expect(useTrafficStore.getState().flows[0].websocketFrames?.map((frame) => frame.id)).toEqual(['frame-1', 'frame-2']);
+  });
+
+  it('caps appended stream items in renderer patches', () => {
+    const frames = Array.from({ length: MAX_STREAM_ITEMS }, (_, index) => ({
+      id: `frame-${index}`,
+      timestamp: index,
+      direction: 'client-to-server' as const,
+      frameType: 'message' as const,
+      body: `frame-${index}`,
+      byteLength: index + 1,
+    }));
+
+    useTrafficStore.getState().setFlows([
+      createFlow({
+        id: 'stream-cap',
+        streamKind: 'websocket',
+        streamOpen: true,
+        websocketFrames: frames,
+      }),
+    ]);
+
+    useTrafficStore.getState().updateFlow({
+      id: 'stream-cap',
+      appendWebSocketFrames: [
+        {
+          id: 'frame-overflow',
+          timestamp: MAX_STREAM_ITEMS + 1,
+          direction: 'server-to-client',
+          frameType: 'message',
+          body: 'overflow',
+          byteLength: 8,
+        },
+      ],
+    });
+
+    const nextFrames = useTrafficStore.getState().flows[0].websocketFrames ?? [];
+    expect(nextFrames).toHaveLength(MAX_STREAM_ITEMS);
+    expect(nextFrames[0].id).toBe('frame-1');
+    expect(nextFrames.at(-1)?.id).toBe('frame-overflow');
   });
 });
 

@@ -1,4 +1,4 @@
-import { HttpFlow, HttpRequest, HttpResponse } from '../../shared/types';
+import { HttpFlow, HttpRequest, HttpResponse, TrafficFlowUpdate } from '../../shared/types';
 import type { UpstreamProxySettings } from '../../shared/upstream-proxy';
 
 export interface ProxyEngineOptions {
@@ -11,7 +11,7 @@ export interface ProxyEngineOptions {
 
 export interface ProxyEvents {
   'flow:start': (flow: HttpFlow) => void;
-  'flow:response': (flow: HttpFlow) => void;
+  'flow:response': (update: TrafficFlowUpdate) => void;
   'flow:complete': (flow: HttpFlow) => void;
   'flow:error': (flowId: string, error: Error) => void;
   'proxy:started': (port: number) => void;

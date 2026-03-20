@@ -6,7 +6,7 @@ import { CertificateManager } from '../proxy/certificate';
 import { AgentClient } from '../agent/client';
 import { replayFlowThroughProxy, sendComposedRequestThroughProxy } from '../proxy/replay';
 import { setSystemProxy, clearSystemProxy, isSystemProxyEnabled } from '../utils/windows-proxy';
-import { ProxyState, Rule, HttpFlow, CaptureFilterMode, ComposerRequest, ScriptRule, ScriptTestResult } from '../../shared/types';
+import { ProxyState, Rule, HttpFlow, CaptureFilterMode, ComposerRequest, ScriptRule, ScriptTestResult, TrafficFlowUpdate } from '../../shared/types';
 import { normalizeThrottleSettings, type ThrottleSettings } from '../../shared/throttle';
 import { normalizeUpstreamProxySettings, type UpstreamProxySettings } from '../../shared/upstream-proxy';
 import { UpdateManager } from '../updater';
@@ -44,13 +44,22 @@ const UPSTREAM_PROXY_SETTINGS_KEY = 'proxy:upstream-settings';
 const UPSTREAM_PROXY_PASSWORD_KEY = 'proxy:upstream-settings-password';
 
 function serializeUpstreamProxySettings(settings: UpstreamProxySettings): string {
-  const { password: _password, ...persistedSettings } = settings;
+  const {
+    password: _password,
+    hasSavedPassword: _hasSavedPassword,
+    passwordChanged: _passwordChanged,
+    ...persistedSettings
+  } = settings;
   return JSON.stringify(persistedSettings);
+}
+
+function clearPersistedUpstreamProxyPassword(): void {
+  setAppSetting(UPSTREAM_PROXY_PASSWORD_KEY, '');
 }
 
 function persistUpstreamProxyPassword(password: string): void {
   if (!password) {
-    setAppSetting(UPSTREAM_PROXY_PASSWORD_KEY, '');
+    clearPersistedUpstreamProxyPassword();
     return;
   }
 
@@ -74,17 +83,47 @@ function hydrateUpstreamProxySettings(serializedSettings: string): UpstreamProxy
 
   if (!safeStorage.isEncryptionAvailable()) {
     console.error('Secure credential storage is unavailable; loading upstream proxy settings without a saved password.');
-    return {
+    const disabledSettings = normalizeUpstreamProxySettings({
       ...parsedSettings,
       enabled: false,
       password: '',
-    };
+      hasSavedPassword: false,
+      passwordChanged: false,
+    });
+    setAppSetting(UPSTREAM_PROXY_SETTINGS_KEY, serializeUpstreamProxySettings(disabledSettings));
+    clearPersistedUpstreamProxyPassword();
+    return disabledSettings;
   }
 
   return {
     ...parsedSettings,
     password: safeStorage.decryptString(Buffer.from(encryptedPassword, 'base64')),
   };
+}
+
+function sanitizeUpstreamProxySettings(settings: UpstreamProxySettings): UpstreamProxySettings {
+  const normalizedSettings = normalizeUpstreamProxySettings(settings);
+  return {
+    ...normalizedSettings,
+    password: '',
+    hasSavedPassword: normalizedSettings.password.length > 0 || normalizedSettings.hasSavedPassword,
+    passwordChanged: false,
+  };
+}
+
+function resolveUpstreamProxySettingsForSave(
+  settings: UpstreamProxySettings,
+  currentSettings: UpstreamProxySettings,
+): UpstreamProxySettings {
+  const normalizedSettings = normalizeUpstreamProxySettings(settings);
+  if (!normalizedSettings.passwordChanged && normalizedSettings.password === '' && normalizedSettings.hasSavedPassword) {
+    return {
+      ...normalizedSettings,
+      password: normalizeUpstreamProxySettings(currentSettings).password,
+    };
+  }
+
+  return normalizedSettings;
 }
 const PROTOBUF_SETTINGS_KEY = 'protobuf:settings';
 
@@ -96,7 +135,7 @@ export function registerIpcHandlers(
   let agentWindow: BrowserWindow | null = null;
   const updateManager = new UpdateManager('pjperez/proxyboy', getAppSetting(AUTO_UPDATE_ENABLED_KEY) !== 'false');
   let protobufSettings: ProtobufSettings = DEFAULT_PROTOBUF_SETTINGS;
-  let pendingFlowUpdates = new Map<string, any>();
+  let pendingFlowUpdates = new Map<string, TrafficFlowUpdate>();
   let flowUpdateTimer: NodeJS.Timeout | null = null;
 
   // Broadcast to all windows that care about agent events
@@ -107,6 +146,33 @@ export function registerIpcHandlers(
     if (agentWindow && !agentWindow.isDestroyed()) {
       agentWindow.webContents.send(channel, data);
     }
+  };
+
+  const mergeFlowUpdate = (
+    previousUpdate: TrafficFlowUpdate | undefined,
+    nextUpdate: TrafficFlowUpdate,
+  ): TrafficFlowUpdate => {
+    if (!previousUpdate) {
+      return {
+        ...nextUpdate,
+        appendWebSocketFrames: nextUpdate.appendWebSocketFrames ? [...nextUpdate.appendWebSocketFrames] : undefined,
+        appendSseEvents: nextUpdate.appendSseEvents ? [...nextUpdate.appendSseEvents] : undefined,
+      };
+    }
+
+    return {
+      id: nextUpdate.id,
+      streamKind: nextUpdate.streamKind ?? previousUpdate.streamKind,
+      streamOpen: nextUpdate.streamOpen ?? previousUpdate.streamOpen,
+      tags: nextUpdate.tags ?? previousUpdate.tags,
+      notes: nextUpdate.notes ?? previousUpdate.notes,
+      appendWebSocketFrames: nextUpdate.appendWebSocketFrames
+        ? [...(previousUpdate.appendWebSocketFrames ?? []), ...nextUpdate.appendWebSocketFrames]
+        : previousUpdate.appendWebSocketFrames,
+      appendSseEvents: nextUpdate.appendSseEvents
+        ? [...(previousUpdate.appendSseEvents ?? []), ...nextUpdate.appendSseEvents]
+        : previousUpdate.appendSseEvents,
+    };
   };
 
   const flushFlowUpdates = () => {
@@ -121,8 +187,8 @@ export function registerIpcHandlers(
     pendingFlowUpdates.clear();
   };
 
-  const enqueueFlowUpdate = (flow: HttpFlow) => {
-    pendingFlowUpdates.set(flow.id, sanitizeFlow(flow));
+  const enqueueFlowUpdate = (flowUpdate: TrafficFlowUpdate) => {
+    pendingFlowUpdates.set(flowUpdate.id, mergeFlowUpdate(pendingFlowUpdates.get(flowUpdate.id), flowUpdate));
     if (!flowUpdateTimer) {
       flowUpdateTimer = setTimeout(flushFlowUpdates, 100);
     }
@@ -136,9 +202,6 @@ export function registerIpcHandlers(
     }
   });
   updateManager.init();
-  mainWindow.on('closed', () => {
-    updateManager.dispose();
-  });
 
   // Proxy control
   ipcMain.handle(IPC_CHANNELS.PROXY_START, async (_event, port?: number) => {
@@ -222,14 +285,14 @@ export function registerIpcHandlers(
 
   ipcMain.handle(IPC_CHANNELS.PROXY_SET_UPSTREAM, async (_event, settings: UpstreamProxySettings) => {
     try {
-      const normalizedSettings = normalizeUpstreamProxySettings(settings);
+      const normalizedSettings = resolveUpstreamProxySettingsForSave(settings, proxyEngine.getUpstreamProxySettings());
       assertUpstreamProxyPasswordCanPersist(normalizedSettings.password);
       setAppSetting(UPSTREAM_PROXY_SETTINGS_KEY, serializeUpstreamProxySettings(normalizedSettings));
       persistUpstreamProxyPassword(normalizedSettings.password);
       proxyEngine.setUpstreamProxySettings(normalizedSettings);
       return {
         success: true,
-        upstreamProxySettings: proxyEngine.getUpstreamProxySettings(),
+        upstreamProxySettings: sanitizeUpstreamProxySettings(proxyEngine.getUpstreamProxySettings()),
       };
     } catch (error: any) {
       return { success: false, error: error.message };
@@ -245,7 +308,7 @@ export function registerIpcHandlers(
       noCacheEnabled: proxyEngine.isNoCacheEnabled(),
       throttleSettings: proxyEngine.getThrottleSettings(),
       throttleProfile: proxyEngine.getThrottleProfile(),
-      upstreamProxySettings: proxyEngine.getUpstreamProxySettings(),
+      upstreamProxySettings: sanitizeUpstreamProxySettings(proxyEngine.getUpstreamProxySettings()),
       totalRequests: proxyEngine.getFlowCount(),
       activeConnections: 0,
       sslEnabled: true,
@@ -259,7 +322,7 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.PROTOBUF_SET_CONFIG, async (_event, settings: ProtobufSettings) => {
     try {
       const normalizedSettings = normalizeProtobufSettings(settings);
-      validateProtobufSettings(normalizedSettings);
+      await validateProtobufSettings(normalizedSettings);
       protobufSettings = normalizedSettings;
       setAppSetting(PROTOBUF_SETTINGS_KEY, JSON.stringify(normalizedSettings));
       return {
@@ -373,8 +436,9 @@ export function registerIpcHandlers(
       }
 
       const composerRequestId = randomUUID();
+      const captured = proxyEngine.getInterceptor().shouldCapture(request.url, request.method);
       await sendComposedRequestThroughProxy(request, proxyEngine.getPort(), composerRequestId);
-      return { success: true, composerRequestId };
+      return { success: true, composerRequestId, captured };
     } catch (error: any) {
       return { success: false, error: error.message };
     }
@@ -442,8 +506,11 @@ export function registerIpcHandlers(
     const savedProtobufSettings = getAppSetting(PROTOBUF_SETTINGS_KEY);
     if (savedProtobufSettings) {
       const normalizedSettings = normalizeProtobufSettings(JSON.parse(savedProtobufSettings));
-      validateProtobufSettings(normalizedSettings);
       protobufSettings = normalizedSettings;
+      void validateProtobufSettings(normalizedSettings).catch((error) => {
+        console.error('Failed to load protobuf settings from database:', error);
+        protobufSettings = DEFAULT_PROTOBUF_SETTINGS;
+      });
     }
   } catch (err) {
     console.error('Failed to load protobuf settings from database:', err);
@@ -955,8 +1022,8 @@ export function registerIpcHandlers(
     mainWindow.webContents.send(IPC_CHANNELS.TRAFFIC_NEW_FLOW, sanitizeFlow(flow));
   });
 
-  proxyEngine.on('flow:response', (flow: HttpFlow) => {
-    enqueueFlowUpdate(flow);
+  proxyEngine.on('flow:response', (flowUpdate: TrafficFlowUpdate) => {
+    enqueueFlowUpdate(flowUpdate);
   });
 
   proxyEngine.on('flow:complete', (flow: HttpFlow) => {
@@ -973,6 +1040,10 @@ export function registerIpcHandlers(
   });
 
   mainWindow.on('closed', () => {
+    if (flowUpdateTimer) {
+      clearTimeout(flowUpdateTimer);
+      flowUpdateTimer = null;
+    }
     updateManager.dispose();
   });
 }
