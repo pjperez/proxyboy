@@ -11,6 +11,7 @@ import ComposerPanel from './components/composer/ComposerPanel';
 import BreakpointEditor from './components/rules/BreakpointEditor';
 import MapLocalEditor from './components/rules/MapLocalEditor';
 import MapRemoteEditor from './components/rules/MapRemoteEditor';
+import ScriptEditor from './components/rules/ScriptEditor';
 import CaptureFilterEditor from './components/rules/CaptureFilterEditor';
 import SettingsPanel from './components/settings/SettingsPanel';
 import BreakpointPauseDialog from './components/rules/BreakpointPauseDialog';
@@ -30,7 +31,7 @@ declare global {
   }
 }
 
-type View = 'traffic' | 'composer' | 'breakpoints' | 'map-local' | 'map-remote' | 'capture-rules' | 'settings';
+type View = 'traffic' | 'composer' | 'breakpoints' | 'map-local' | 'map-remote' | 'scripts' | 'capture-rules' | 'settings';
 
 function buildComposerDraftFromFlow(flow: HttpFlow): ComposerRequest {
   const body = (flow.request as any)._isBase64
@@ -566,6 +567,9 @@ function MainApp() {
           {selectedView === 'breakpoints' && <BreakpointEditor />}
           {selectedView === 'map-local' && <MapLocalEditor />}
           {selectedView === 'map-remote' && <MapRemoteEditor />}
+          {selectedView === 'scripts' && <ScriptEditor selectedFlowId={selectedFlowId} />}
+          {selectedView === 'map-remote' && <MapRemoteEditor />}
+          {selectedView === 'scripts' && <ScriptEditor selectedFlowId={selectedFlowId} />}
           {selectedView === 'capture-rules' && <CaptureFilterEditor />}
           {selectedView === 'settings' && <SettingsPanel />}
         </div>

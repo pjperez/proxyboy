@@ -145,7 +145,8 @@ export interface StatusCodeRange {
 
 // Rule types
 export type CaptureFilterMode = 'capture-all' | 'allow-list' | 'block-list';
-export type RuleType = 'breakpoint' | 'map-local' | 'map-remote' | 'allow-list' | 'block-list';
+export type ScriptPhase = 'request' | 'response' | 'both';
+export type RuleType = 'breakpoint' | 'map-local' | 'map-remote' | 'allow-list' | 'block-list' | 'script';
 
 export interface Rule {
   id: string;
@@ -187,6 +188,21 @@ export interface AllowListRule extends Rule {
 
 export interface BlockListRule extends Rule {
   type: 'block-list';
+}
+
+export interface ScriptRule extends Rule {
+  type: 'script';
+  phase: ScriptPhase;
+  code: string;
+}
+
+export interface ScriptTestResult {
+  success: boolean;
+  blocked?: boolean;
+  notes?: string[];
+  request?: HttpRequest;
+  response?: HttpResponse;
+  error?: string;
 }
 
 // Agent types
