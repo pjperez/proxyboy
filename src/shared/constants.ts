@@ -50,6 +50,11 @@ export const IPC_CHANNELS = {
   
   // App
   APP_GET_VERSION: 'app:get-version',
+  APP_GET_UPDATE_STATE: 'app:get-update-state',
+  APP_CHECK_FOR_UPDATES: 'app:check-for-updates',
+  APP_SET_AUTO_UPDATE_ENABLED: 'app:set-auto-update-enabled',
+  APP_INSTALL_UPDATE: 'app:install-update',
+  APP_UPDATE_STATE: 'app:update-state',
   APP_EXPORT_HAR: 'app:export-har',
   APP_IMPORT_HAR: 'app:import-har',
   APP_PICK_FILE: 'app:pick-file',

@@ -22,6 +22,10 @@
   "author": "Pedro Perez",
   "license": "MIT",
   "type": "commonjs",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/pjperez/proxyboy.git"
+  },
   "dependencies": {
     "@github/copilot-sdk": "^0.1.32",
     "@monaco-editor/react": "^4.7.0",
@@ -48,6 +52,7 @@
     "@electron-forge/plugin-fuses": "^7.11.1",
     "@electron-forge/plugin-vite": "^7.11.1",
     "@electron-forge/plugin-webpack": "^7.11.1",
+    "@electron-forge/publisher-github": "^7.11.1",
     "@electron-forge/shared-types": "^7.11.1",
     "@electron/fuses": "^1.8.0",
     "@tailwindcss/postcss": "^4.2.1",

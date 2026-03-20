@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../shared/constants';
-import type { ProxyState, HttpFlow, Rule, FilterCriteria, CaptureFilterMode, ComposerRequest } from '../shared/types';
+import type { ProxyState, HttpFlow, Rule, FilterCriteria, CaptureFilterMode, ComposerRequest, AppUpdateState } from '../shared/types';
 import type { ThrottleSettings } from '../shared/throttle';
 
 const api = {
@@ -110,6 +110,15 @@ const api = {
   // App
   app: {
     getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.APP_GET_VERSION),
+    getUpdateState: (): Promise<AppUpdateState> => ipcRenderer.invoke(IPC_CHANNELS.APP_GET_UPDATE_STATE),
+    checkForUpdates: () => ipcRenderer.invoke(IPC_CHANNELS.APP_CHECK_FOR_UPDATES),
+    setAutoUpdateEnabled: (enabled: boolean) => ipcRenderer.invoke(IPC_CHANNELS.APP_SET_AUTO_UPDATE_ENABLED, enabled),
+    installUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.APP_INSTALL_UPDATE),
+    onUpdateState: (callback: (state: AppUpdateState) => void) => {
+      const handler = (_event: any, state: AppUpdateState) => callback(state);
+      ipcRenderer.on(IPC_CHANNELS.APP_UPDATE_STATE, handler);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.APP_UPDATE_STATE, handler);
+    },
     exportHar: (flowIds?: string[]) => ipcRenderer.invoke(IPC_CHANNELS.APP_EXPORT_HAR, flowIds),
     importHar: () => ipcRenderer.invoke(IPC_CHANNELS.APP_IMPORT_HAR),
     pickFile: () => ipcRenderer.invoke(IPC_CHANNELS.APP_PICK_FILE),

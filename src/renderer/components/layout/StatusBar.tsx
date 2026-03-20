@@ -16,6 +16,7 @@ export default function StatusBar() {
     proxyPort,
     noCacheEnabled,
     throttleSettings,
+    updateState,
     setNoCacheEnabled,
     setThrottleSettings,
   } = useAppStore();
@@ -140,6 +141,30 @@ export default function StatusBar() {
           <span className="text-pb-error">
             Errors: {errorCount}
           </span>
+        </>
+      )}
+      {updateState.supported && (updateState.checking || updateState.updateAvailable || updateState.updateDownloaded) && (
+        <>
+          <span className="mx-3 text-pb-border">|</span>
+          {updateState.updateDownloaded ? (
+            <button
+              onClick={async () => {
+                const result = await window.proxyboy?.app.installUpdate();
+                if (!result?.success) {
+                  window.alert(result?.error || 'Failed to install the downloaded update.');
+                }
+              }}
+              className="text-pb-accent hover:text-pb-text transition-colors"
+            >
+              ⬆ Restart to update{updateState.latestVersion ? ` (${updateState.latestVersion})` : ''}
+            </button>
+          ) : updateState.updateAvailable ? (
+            <span className="text-pb-accent">
+              ⬇ Update downloading{updateState.latestVersion ? ` (${updateState.latestVersion})` : ''}
+            </span>
+          ) : (
+            <span className="text-pb-text-dim">🔄 Checking for updates…</span>
+          )}
         </>
       )}
       {proxyRunning && certInstalled === false && (

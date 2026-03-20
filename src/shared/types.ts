@@ -84,6 +84,18 @@ export interface ProxyState {
   sslEnabled: boolean;
 }
 
+export interface AppUpdateState {
+  supported: boolean;
+  enabled: boolean;
+  checking: boolean;
+  updateAvailable: boolean;
+  updateDownloaded: boolean;
+  currentVersion: string;
+  latestVersion?: string;
+  lastCheckedAt?: number;
+  error?: string;
+}
+
 // Filter types
 export interface FilterCriteria {
   text?: string;

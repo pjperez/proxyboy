@@ -17,10 +17,12 @@ export default function SettingsPanel() {
     noCacheEnabled,
     throttleSettings,
     trafficRowColorMode,
+    updateState,
     setNoCacheEnabled,
     setThrottleSettings,
     setTheme,
     setTrafficRowColorMode,
+    setUpdateState,
   } = useAppStore();
   const [autoStart, setAutoStart] = useState(() =>
     localStorage.getItem('proxyboy-auto-start') === 'true'
@@ -129,6 +131,33 @@ export default function SettingsPanel() {
 
   const handleClearDnsCache = () => {
     window.proxyboy?.dns.clearCache();
+  };
+
+  const handleAutoUpdateToggle = async () => {
+    const result = await window.proxyboy?.app.setAutoUpdateEnabled(!updateState.enabled);
+    if (result?.state) {
+      setUpdateState(result.state);
+    }
+    if (!result?.success) {
+      window.alert(result?.error || 'Failed to update the automatic update setting.');
+    }
+  };
+
+  const handleCheckForUpdates = async () => {
+    const result = await window.proxyboy?.app.checkForUpdates();
+    if (result?.state) {
+      setUpdateState(result.state);
+    }
+    if (!result?.success) {
+      window.alert(result?.error || 'Failed to check for updates.');
+    }
+  };
+
+  const handleInstallUpdate = async () => {
+    const result = await window.proxyboy?.app.installUpdate();
+    if (!result?.success) {
+      window.alert(result?.error || 'Failed to install the downloaded update.');
+    }
   };
 
   const resolvedTheme = resolveThemePreference(theme);
@@ -318,6 +347,54 @@ export default function SettingsPanel() {
         </Row>
       </Section>
 
+      <Section title="Updates">
+        <Row label="Automatic update checks">
+          <div className="flex flex-col items-end gap-1">
+            <Toggle checked={updateState.enabled} onChange={handleAutoUpdateToggle} />
+            <span className="text-xs text-pb-text-dim">
+              Checks GitHub Releases on startup and periodically while the app stays open.
+            </span>
+          </div>
+        </Row>
+        <Row label="Update status">
+          <div className="flex flex-col items-end gap-1 text-right">
+            <span className="text-sm text-pb-text">
+              {describeUpdateState(updateState)}
+            </span>
+            <span className="text-xs text-pb-text-dim">
+              Current version {updateState.currentVersion}
+              {updateState.latestVersion ? ` • Latest ${updateState.latestVersion}` : ''}
+            </span>
+            {updateState.error && <span className="text-xs text-pb-error">{updateState.error}</span>}
+          </div>
+        </Row>
+        <Row label="Update actions">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleCheckForUpdates}
+              disabled={!updateState.supported || updateState.checking}
+              className="px-3 py-1.5 rounded text-sm font-medium bg-pb-accent text-pb-bg hover:bg-pb-accent/80 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {updateState.checking ? 'Checking…' : 'Check now'}
+            </button>
+            <button
+              onClick={handleInstallUpdate}
+              disabled={!updateState.updateDownloaded}
+              className="px-3 py-1.5 rounded text-sm text-pb-text border border-pb-border hover:bg-pb-surface-hover disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Restart to update
+            </button>
+          </div>
+        </Row>
+        {!updateState.supported && (
+          <Row label="">
+            <span className="text-xs text-pb-text-dim">
+              Auto-update is available in packaged Windows builds. Development runs do not contact the update feed.
+            </span>
+          </Row>
+        )}
+      </Section>
+
       {/* Appearance */}
       <Section title="Appearance">
         <Row label="Theme">
@@ -371,7 +448,7 @@ export default function SettingsPanel() {
           <span className="text-sm text-pb-text">ProxyBoy</span>
         </Row>
         <Row label="Version">
-          <span className="text-sm text-pb-text font-mono">1.0.0</span>
+          <span className="text-sm text-pb-text font-mono">{updateState.currentVersion}</span>
         </Row>
         <Row label="Built with">
           <span className="text-sm text-pb-text">Electron, React, GitHub Copilot SDK</span>
@@ -382,6 +459,25 @@ export default function SettingsPanel() {
       </Section>
     </div>
   );
+}
+
+function describeUpdateState(updateState: ReturnType<typeof useAppStore.getState>['updateState']): string {
+  if (!updateState.supported) {
+    return 'Unavailable in development builds';
+  }
+  if (updateState.updateDownloaded) {
+    return 'Update downloaded and ready to install';
+  }
+  if (updateState.updateAvailable) {
+    return 'Update found and downloading in the background';
+  }
+  if (updateState.checking) {
+    return 'Checking for updates';
+  }
+  if (updateState.lastCheckedAt) {
+    return `Last checked ${new Date(updateState.lastCheckedAt).toLocaleString()}`;
+  }
+  return 'Waiting for the first update check';
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {

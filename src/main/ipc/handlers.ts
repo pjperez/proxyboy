@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, dialog } from 'electron';
+import { ipcMain, BrowserWindow, dialog, app } from 'electron';
 import * as path from 'path';
 import { IPC_CHANNELS } from '../../shared/constants';
 import { ProxyEngine } from '../proxy/engine';
@@ -11,6 +11,7 @@ import { normalizeThrottleSettings, type ThrottleSettings } from '../../shared/t
 import { flowsToHar } from '../utils/har';
 import { randomUUID } from 'crypto';
 import { annotateGraphQLRequest } from '../../shared/graphql';
+import { UpdateManager } from '../updater';
 import {
   saveFlow,
   clearAllFlows,
@@ -29,6 +30,7 @@ declare const MAIN_WINDOW_VITE_NAME: string;
 
 const NO_CACHE_SETTING_KEY = 'proxy:no-cache-enabled';
 const THROTTLE_SETTINGS_KEY = 'proxy:throttle-settings';
+const AUTO_UPDATE_ENABLED_KEY = 'app:auto-update-enabled';
 
 export function registerIpcHandlers(
   mainWindow: BrowserWindow,
@@ -36,6 +38,7 @@ export function registerIpcHandlers(
   certManager: CertificateManager,
 ): void {
   let agentWindow: BrowserWindow | null = null;
+  const updateManager = new UpdateManager('pjperez/proxyboy', getAppSetting(AUTO_UPDATE_ENABLED_KEY) !== 'false');
 
   // Broadcast to all windows that care about agent events
   const broadcastAgent = (channel: string, data: any) => {
@@ -48,6 +51,16 @@ export function registerIpcHandlers(
   };
 
   const agentClient = new AgentClient(proxyEngine, broadcastAgent);
+
+  updateManager.on('state-changed', (state) => {
+    if (!mainWindow.isDestroyed()) {
+      mainWindow.webContents.send(IPC_CHANNELS.APP_UPDATE_STATE, state);
+    }
+  });
+  updateManager.init();
+  mainWindow.on('closed', () => {
+    updateManager.dispose();
+  });
 
   // Proxy control
   ipcMain.handle(IPC_CHANNELS.PROXY_START, async (_event, port?: number) => {
@@ -537,7 +550,41 @@ export function registerIpcHandlers(
   // App
   ipcMain.handle(IPC_CHANNELS.APP_GET_VERSION, () => {
     try {
-      return { version: '1.0.0', name: 'ProxyBoy' };
+      return { version: app.getVersion(), name: app.getName() };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.APP_GET_UPDATE_STATE, () => {
+    try {
+      return updateManager.getState();
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.APP_CHECK_FOR_UPDATES, async () => {
+    try {
+      return await updateManager.checkForUpdates();
+    } catch (error: any) {
+      return { success: false, state: updateManager.getState(), error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.APP_SET_AUTO_UPDATE_ENABLED, async (_event, enabled: boolean) => {
+    try {
+      const result = updateManager.setEnabled(enabled);
+      setAppSetting(AUTO_UPDATE_ENABLED_KEY, enabled ? 'true' : 'false');
+      return result;
+    } catch (error: any) {
+      return { success: false, state: updateManager.getState(), error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.APP_INSTALL_UPDATE, async () => {
+    try {
+      return updateManager.installUpdate();
     } catch (error: any) {
       return { success: false, error: error.message };
     }
@@ -690,6 +737,10 @@ export function registerIpcHandlers(
     if (!mainWindow.isDestroyed()) {
       mainWindow.webContents.send(IPC_CHANNELS.BREAKPOINT_PAUSED, data);
     }
+  });
+
+  mainWindow.on('closed', () => {
+    updateManager.dispose();
   });
 }
 
