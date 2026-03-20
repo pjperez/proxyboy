@@ -17,6 +17,13 @@ import { applyNoCacheToRequestHeaders, applyNoCacheToResponseHeaders } from './n
 import { resolveMapRemoteUrl } from './map-remote';
 import { createFlowThrottleController } from './throttle';
 import {
+  createWebSocketFrame,
+  flushSseBuffer,
+  isSseContentType,
+  isWebSocketUpgrade,
+  parseSseChunk,
+} from './streaming';
+import {
   DEFAULT_THROTTLE_SETTINGS,
   normalizeThrottleSettings,
   resolveThrottleProfile,
@@ -36,6 +43,7 @@ import {
 
 const MAX_FLOWS = 10000;
 const MAX_BODY_SIZE = 2 * 1024 * 1024; // 2 MB
+const MAX_STREAM_ITEMS = 500;
 
 function decompressBody(body: Buffer, encoding?: string): Buffer {
   // Try explicit content-encoding first
@@ -175,6 +183,75 @@ export class ProxyEngine extends EventEmitter {
     this.flows.clear();
   }
 
+  private emitFlowUpdate(flow: HttpFlow): void {
+    this.flows.set(flow.id, flow);
+    this.emit('flow:response', flow);
+  }
+
+  private createWebSocketFlow(ctx: any): HttpFlow | null {
+    const upgradeReq = ctx.clientToProxyWebSocket?.upgradeReq;
+    if (!upgradeReq) {
+      return null;
+    }
+
+    const requestMethod = upgradeReq.method || 'GET';
+    const requestHost = upgradeReq.headers.host || '';
+    const requestPath = upgradeReq.url || '/';
+    const requestUrl = (ctx.isSSL ? 'wss' : 'ws') + '://' + requestHost + requestPath;
+
+    if (!this.interceptor.shouldCapture(requestUrl, requestMethod)) {
+      return null;
+    }
+
+    const startTime = Date.now();
+    const flow: HttpFlow = {
+      id: randomUUID(),
+      request: {
+        id: randomUUID(),
+        method: requestMethod,
+        url: requestUrl,
+        protocol: ctx.isSSL ? 'https' : 'http',
+        host: requestHost,
+        path: requestPath,
+        headers: { ...upgradeReq.headers },
+        bodySize: 0,
+        timestamp: startTime,
+      },
+      response: {
+        id: randomUUID(),
+        requestId: '',
+        statusCode: 101,
+        statusMessage: 'Switching Protocols',
+        headers: {
+          upgrade: 'websocket',
+          connection: 'Upgrade',
+        },
+        bodySize: 0,
+        timestamp: startTime,
+        duration: 0,
+      },
+      state: 'pending',
+      tags: ['websocket'],
+      createdAt: startTime,
+      timing: { start: startTime, responseStart: startTime },
+      streamKind: 'websocket',
+      streamOpen: true,
+      websocketFrames: [],
+    };
+    flow.response!.requestId = flow.request.id;
+    return flow;
+  }
+
+  private capStreamItems<T>(items: T[], flow: HttpFlow, tag: string): T[] {
+    if (items.length <= MAX_STREAM_ITEMS) {
+      return items;
+    }
+    if (!flow.tags.includes(tag)) {
+      flow.tags.push(tag);
+    }
+    return items.slice(items.length - MAX_STREAM_ITEMS);
+  }
+
   private markFlowAsSslPinningSuspected(flowId: string | undefined, error: unknown): void {
     if (!flowId) {
       return;
@@ -284,6 +361,75 @@ export class ProxyEngine extends EventEmitter {
       return origStdoutWrite(chunk, ...args);
     };
 
+    this.proxy.onWebSocketConnection((ctx: any, callback: () => void) => {
+      const flow = this.createWebSocketFlow(ctx);
+      if (!flow) {
+        callback();
+        return;
+      }
+
+      ctx.proxyboyFlowId = flow.id;
+      this.flows.set(flow.id, flow);
+      this.emit('flow:start', flow);
+      callback();
+    });
+
+    this.proxy.onWebSocketFrame((ctx: any, type: string, fromServer: boolean, message: unknown, flags: any, callback: any) => {
+      const flowId = ctx.proxyboyFlowId;
+      const flow = typeof flowId === 'string' ? this.flows.get(flowId) : undefined;
+      if (flow) {
+        const nextFrame = createWebSocketFrame(type, fromServer, message);
+        flow.websocketFrames = this.capStreamItems([...(flow.websocketFrames ?? []), nextFrame], flow, 'websocket-frames-capped');
+        flow.streamKind = 'websocket';
+        flow.streamOpen = true;
+        if (flow.response) {
+          flow.response.duration = Date.now() - flow.createdAt;
+        }
+        if (flow.timing && flow.timing.firstByte == null) {
+          flow.timing.firstByte = Date.now();
+        }
+        this.emitFlowUpdate(flow);
+      }
+      callback(null, message, flags);
+    });
+
+    this.proxy.onWebSocketClose((ctx: any, code: number, message: unknown, callback: any) => {
+      const flowId = ctx.proxyboyFlowId;
+      const flow = typeof flowId === 'string' ? this.flows.get(flowId) : undefined;
+      if (flow && flow.state !== 'complete' && flow.state !== 'error') {
+        flow.streamOpen = false;
+        flow.state = 'complete';
+        flow.notes = message ? `WebSocket closed (${code}): ${String(message)}` : `WebSocket closed (${code})`;
+        if (flow.timing) {
+          flow.timing.responseEnd = Date.now();
+        }
+        if (flow.response) {
+          flow.response.duration = Date.now() - flow.createdAt;
+        }
+        this.flows.set(flow.id, flow);
+        this.emit('flow:complete', flow);
+      }
+      callback(null, code, message);
+    });
+
+    this.proxy.onWebSocketError((ctx: any, err?: Error | null) => {
+      const flowId = ctx.proxyboyFlowId;
+      const flow = typeof flowId === 'string' ? this.flows.get(flowId) : undefined;
+      if (flow && flow.state !== 'complete' && flow.state !== 'error') {
+        flow.streamOpen = false;
+        flow.state = 'error';
+        flow.notes = err?.message || 'WebSocket proxy error';
+        if (flow.timing) {
+          flow.timing.responseEnd = Date.now();
+        }
+        if (flow.response) {
+          flow.response.duration = Date.now() - flow.createdAt;
+        }
+        this.flows.set(flow.id, flow);
+        this.emit('flow:complete', flow);
+      }
+    });
+
     this.proxy.onRequest((ctx: any, callback: () => void) => {
       const requestMethod = ctx.clientToProxyRequest.method || 'GET';
       const requestHost = ctx.clientToProxyRequest.headers.host || '';
@@ -293,6 +439,11 @@ export class ProxyEngine extends EventEmitter {
       if (ctx.proxyToServerRequestOptions) {
         const agents = useUpstreamProxy ? (this.upstreamAgents ?? this.directAgents) : this.directAgents;
         ctx.proxyToServerRequestOptions.agent = ctx.isSSL ? agents.httpsAgent : agents.httpAgent;
+      }
+
+      if (isWebSocketUpgrade(ctx.clientToProxyRequest.headers)) {
+        callback();
+        return;
       }
 
       if (!this.interceptor.shouldCapture(requestUrl, requestMethod)) {
@@ -445,11 +596,21 @@ export class ProxyEngine extends EventEmitter {
       // Collect response
       const responseChunks: Buffer[] = [];
       let firstByteRecorded = false;
+      let sseRemainder = '';
 
       ctx.onResponse((ctx: any, cb: () => void) => {
         if (flow.timing) flow.timing.responseStart = Date.now();
         if (this.noCacheEnabled && ctx.serverToProxyResponse?.headers) {
           applyNoCacheToResponseHeaders(ctx.serverToProxyResponse.headers as Record<string, string | string[]>);
+        }
+        if (isSseContentType(ctx.serverToProxyResponse?.headers?.['content-type'])) {
+          flow.streamKind = 'sse';
+          flow.streamOpen = true;
+          flow.sseEvents = flow.sseEvents ?? [];
+          if (!flow.tags.includes('sse')) {
+            flow.tags.push('sse');
+          }
+          this.emitFlowUpdate(flow);
         }
         // Response-phase breakpoint
         const responseBreakRule = this.interceptor.shouldBreakpoint(flow, 'response');
@@ -462,6 +623,7 @@ export class ProxyEngine extends EventEmitter {
                 ctx.proxyToClientResponse.end('Dropped by ProxyBoy breakpoint');
               } catch { /* connection may already be closed */ }
               flow.state = 'blocked';
+              flow.streamOpen = false;
               flow.tags.push('breakpoint-dropped');
               this.flows.set(flowId, flow);
               this.emit('flow:complete', flow);
@@ -479,13 +641,30 @@ export class ProxyEngine extends EventEmitter {
           flow.timing.firstByte = Date.now();
           firstByteRecorded = true;
         }
-        responseChunks.push(chunk);
+        if (flow.streamKind === 'sse') {
+          const parsed = parseSseChunk(sseRemainder, chunk);
+          sseRemainder = parsed.remainder;
+          if (parsed.events.length > 0) {
+            flow.sseEvents = this.capStreamItems([...(flow.sseEvents ?? []), ...parsed.events], flow, 'sse-events-capped');
+            flow.streamOpen = true;
+            this.emitFlowUpdate(flow);
+          }
+        } else {
+          responseChunks.push(chunk);
+        }
         throttleController.scheduleDownloadChunk(chunk, callback);
       });
 
       ctx.onResponseEnd((ctx: any, cb: () => void) => {
         const endTime = Date.now();
         if (flow.timing) flow.timing.responseEnd = endTime;
+        if (flow.streamKind === 'sse') {
+          const trailingEvents = flushSseBuffer(sseRemainder);
+          if (trailingEvents.length > 0) {
+            flow.sseEvents = this.capStreamItems([...(flow.sseEvents ?? []), ...trailingEvents], flow, 'sse-events-capped');
+          }
+          flow.streamOpen = false;
+        }
 
         const rawBody = responseChunks.length > 0 ? Buffer.concat(responseChunks) : undefined;
         let responseBody = rawBody ? decompressBody(rawBody, ctx.serverToProxyResponse?.headers?.['content-encoding']) : undefined;
@@ -538,6 +717,7 @@ export class ProxyEngine extends EventEmitter {
               ctx.proxyToClientResponse.end('Dropped by ProxyBoy breakpoint');
             } catch { /* connection may already be closed */ }
             flow.state = 'blocked';
+            flow.streamOpen = false;
             flow.tags.push('breakpoint-dropped');
             this.flows.set(flowId, flow);
             this.emit('flow:complete', flow);

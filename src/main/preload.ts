@@ -40,6 +40,11 @@ const api = {
       ipcRenderer.on(IPC_CHANNELS.TRAFFIC_FLOW_COMPLETE, handler);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.TRAFFIC_FLOW_COMPLETE, handler);
     },
+    onFlowUpdated: (callback: (flow: HttpFlow) => void) => {
+      const handler = (_event: any, flow: HttpFlow) => callback(flow);
+      ipcRenderer.on(IPC_CHANNELS.TRAFFIC_FLOW_UPDATED, handler);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.TRAFFIC_FLOW_UPDATED, handler);
+    },
   },
 
   // Rules

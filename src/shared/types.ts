@@ -35,6 +35,27 @@ export interface HttpResponse {
   duration: number;
 }
 
+export interface WebSocketFrame {
+  id: string;
+  timestamp: number;
+  direction: 'client-to-server' | 'server-to-client';
+  frameType: 'message' | 'ping' | 'pong' | 'close';
+  body: string;
+  isBase64?: boolean;
+  byteLength: number;
+  truncated?: boolean;
+}
+
+export interface SseEvent {
+  id: string;
+  event?: string;
+  data: string;
+  timestamp: number;
+  retry?: number;
+  byteLength: number;
+  truncated?: boolean;
+}
+
 export interface HttpFlow {
   id: string;
   request: HttpRequest;
@@ -45,6 +66,10 @@ export interface HttpFlow {
   composerRequestId?: string;
   createdAt: number;
   timing?: FlowTiming;
+  streamKind?: 'websocket' | 'sse';
+  streamOpen?: boolean;
+  websocketFrames?: WebSocketFrame[];
+  sseEvents?: SseEvent[];
 }
 
 export interface FlowTiming {

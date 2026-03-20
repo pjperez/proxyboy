@@ -95,6 +95,8 @@ export function registerIpcHandlers(
   let agentWindow: BrowserWindow | null = null;
   const updateManager = new UpdateManager('pjperez/proxyboy', getAppSetting(AUTO_UPDATE_ENABLED_KEY) !== 'false');
   let protobufSettings: ProtobufSettings = DEFAULT_PROTOBUF_SETTINGS;
+  let pendingFlowUpdates = new Map<string, any>();
+  let flowUpdateTimer: NodeJS.Timeout | null = null;
 
   // Broadcast to all windows that care about agent events
   const broadcastAgent = (channel: string, data: any) => {
@@ -103,6 +105,25 @@ export function registerIpcHandlers(
     }
     if (agentWindow && !agentWindow.isDestroyed()) {
       agentWindow.webContents.send(channel, data);
+    }
+  };
+
+  const flushFlowUpdates = () => {
+    flowUpdateTimer = null;
+    if (mainWindow.isDestroyed()) {
+      pendingFlowUpdates.clear();
+      return;
+    }
+    for (const flow of pendingFlowUpdates.values()) {
+      mainWindow.webContents.send(IPC_CHANNELS.TRAFFIC_FLOW_UPDATED, flow);
+    }
+    pendingFlowUpdates.clear();
+  };
+
+  const enqueueFlowUpdate = (flow: HttpFlow) => {
+    pendingFlowUpdates.set(flow.id, sanitizeFlow(flow));
+    if (!flowUpdateTimer) {
+      flowUpdateTimer = setTimeout(flushFlowUpdates, 100);
     }
   };
 
@@ -869,7 +890,12 @@ export function registerIpcHandlers(
     mainWindow.webContents.send(IPC_CHANNELS.TRAFFIC_NEW_FLOW, sanitizeFlow(flow));
   });
 
+  proxyEngine.on('flow:response', (flow: HttpFlow) => {
+    enqueueFlowUpdate(flow);
+  });
+
   proxyEngine.on('flow:complete', (flow: HttpFlow) => {
+    pendingFlowUpdates.delete(flow.id);
     mainWindow.webContents.send(IPC_CHANNELS.TRAFFIC_FLOW_COMPLETE, sanitizeFlow(flow));
     saveFlow(flow);
   });
