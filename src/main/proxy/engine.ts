@@ -177,6 +177,24 @@ function syncActiveRequestHeaders(ctx: any, request: HttpRequest): void {
   }
 }
 
+export function applyPreparedRequestScriptResult(
+  current: HttpRequest,
+  next: HttpRequest,
+): HttpRequest {
+  return {
+    ...current,
+    method: next.method,
+    url: next.url,
+    protocol: next.protocol,
+    host: next.host,
+    path: next.path,
+    headers: {
+      ...cloneHeaders(next.headers),
+      host: next.headers.host ?? next.host,
+    },
+  };
+}
+
 export class ProxyEngine extends EventEmitter {
   private proxy: IProxy;
   private certManager: CertificateManager;
@@ -654,18 +672,7 @@ export class ProxyEngine extends EventEmitter {
               ctx.proxyToClientResponse.end('Blocked by ProxyBoy script');
               return;
             }
-            initialRequest = {
-              ...initialRequest,
-              method: normalized.request.method,
-              url: normalized.request.url,
-              protocol: normalized.request.protocol,
-              host: normalized.request.host,
-              path: normalized.request.path,
-              headers: {
-                ...cloneHeaders(initialRequest.headers),
-                host: normalized.request.headers.host ?? normalized.request.host,
-              },
-            };
+            initialRequest = applyPreparedRequestScriptResult(initialRequest, normalized.request);
           } catch (error) {
             pendingScriptNotes.push(`Script "${rule.name}" failed before the request was sent: ${error instanceof Error ? error.message : String(error)}`);
           }
