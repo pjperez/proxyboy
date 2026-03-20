@@ -12,6 +12,7 @@ import { buildSslPinningGuidance, isSuspectedSslPinningError } from './ssl-pinni
 import { ProxyEngineOptions } from './types';
 import { annotateGraphQLRequest } from '../../shared/graphql';
 import { applyNoCacheToRequestHeaders, applyNoCacheToResponseHeaders } from './no-cache';
+import { resolveMapRemoteUrl } from './map-remote';
 import { createFlowThrottleController } from './throttle';
 import {
   DEFAULT_THROTTLE_SETTINGS,
@@ -306,8 +307,10 @@ export class ProxyEngine extends EventEmitter {
         applyNoCacheToRequestHeaders(ctx.clientToProxyRequest.headers as Record<string, string | string[]>);
       }
 
+      const originalRequestUrl = request.url;
+
       // Check map local
-      const mapLocalRule = this.interceptor.getMapLocalRule(request.url, request.method);
+      const mapLocalRule = this.interceptor.getMapLocalRule(originalRequestUrl, request.method);
       if (mapLocalRule) {
         const localResponse = this.interceptor.getMapLocalResponse(mapLocalRule);
         if (localResponse) {
@@ -341,12 +344,36 @@ export class ProxyEngine extends EventEmitter {
         }
       }
 
+      let mapRemoteNote: string | undefined;
+      const mapRemoteRule = this.interceptor.getMapRemoteRule(originalRequestUrl, request.method);
+      if (mapRemoteRule) {
+        const targetUrl = resolveMapRemoteUrl(mapRemoteRule, originalRequestUrl);
+
+        request.url = targetUrl.toString();
+        request.host = targetUrl.host;
+        request.path = `${targetUrl.pathname}${targetUrl.search}`;
+        request.headers.host = targetUrl.host;
+        ctx.clientToProxyRequest.headers.host = targetUrl.host;
+        ctx.clientToProxyRequest.url = request.path;
+
+        if (ctx.proxyToServerRequestOptions) {
+          ctx.proxyToServerRequestOptions.host = targetUrl.hostname;
+          ctx.proxyToServerRequestOptions.port = targetUrl.port || (targetUrl.protocol === 'https:' ? 443 : 80);
+          ctx.proxyToServerRequestOptions.path = request.path;
+          ctx.proxyToServerRequestOptions.headers.host = targetUrl.host;
+        }
+
+        initialTags.push('map-remote');
+        mapRemoteNote = `Map Remote redirected ${originalRequestUrl} -> ${request.url}`;
+      }
+
       const flow: HttpFlow = {
         id: flowId,
         request,
         state: 'pending',
         tags: [...initialTags],
         composerRequestId,
+        notes: mapRemoteNote,
         createdAt: startTime,
         timing: { start: startTime },
       };

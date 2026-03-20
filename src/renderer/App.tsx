@@ -10,6 +10,7 @@ import AgentPanel from './components/agent/AgentPanel';
 import ComposerPanel from './components/composer/ComposerPanel';
 import BreakpointEditor from './components/rules/BreakpointEditor';
 import MapLocalEditor from './components/rules/MapLocalEditor';
+import MapRemoteEditor from './components/rules/MapRemoteEditor';
 import CaptureFilterEditor from './components/rules/CaptureFilterEditor';
 import SettingsPanel from './components/settings/SettingsPanel';
 import BreakpointPauseDialog from './components/rules/BreakpointPauseDialog';
@@ -29,7 +30,7 @@ declare global {
   }
 }
 
-type View = 'traffic' | 'composer' | 'breakpoints' | 'map-local' | 'capture-rules' | 'settings';
+type View = 'traffic' | 'composer' | 'breakpoints' | 'map-local' | 'map-remote' | 'capture-rules' | 'settings';
 
 function buildComposerDraftFromFlow(flow: HttpFlow): ComposerRequest {
   const body = (flow.request as any)._isBase64
@@ -44,7 +45,7 @@ function buildComposerDraftFromFlow(flow: HttpFlow): ComposerRequest {
     method: flow.request.method,
     url: flow.request.url,
     headers: flow.request.headers,
-    body,
+      body,
   };
 }
 
@@ -549,6 +550,7 @@ function MainApp() {
           {selectedView === 'composer' && <ComposerPanel draft={composerDraft} />}
           {selectedView === 'breakpoints' && <BreakpointEditor />}
           {selectedView === 'map-local' && <MapLocalEditor />}
+          {selectedView === 'map-remote' && <MapRemoteEditor />}
           {selectedView === 'capture-rules' && <CaptureFilterEditor />}
           {selectedView === 'settings' && <SettingsPanel />}
         </div>

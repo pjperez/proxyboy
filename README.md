@@ -24,6 +24,7 @@ ProxyBoy is a man-in-the-middle (MITM) HTTP/HTTPS proxy that captures, inspects,
 - **AI Assistant** — Chat panel powered by GitHub Copilot that can search traffic, analyze patterns, create rules, and export data
 - **Breakpoint Rules** — Pause requests/responses mid-flight, inspect them, then forward or drop
 - **Map Local Rules** — Serve local files instead of remote responses for mocking APIs
+- **Map Remote Rules** — Forward matching requests to a different upstream host without changing your client
 - **Capture Rules** — Switch between capture-all, allow-list, and block-list modes to control what gets recorded
 - **System Proxy Integration** — Toggle Windows system proxy on/off from the app
 - **HAR Export/Import** — Standard HAR format for sharing captures with other tools
@@ -109,7 +110,7 @@ Output goes to `out/make/`.
 1. **Start the proxy** — Click the play button in the status bar or use the AI assistant
 2. **Route traffic** — Either toggle "System Proxy" in settings, or manually configure your browser/app to use `127.0.0.1:9090`
 3. **Inspect** — Click any row to see request/response details
-4. **Create rules** — Use the Breakpoints or Map Local views, or ask the AI assistant
+4. **Create rules** — Use the Breakpoints, Map Local, or Map Remote views, or ask the AI assistant
 5. **AI Assistant** — Click the robot icon in the sidebar or press `Ctrl+Shift+A`
 
 ### SSL/HTTPS
