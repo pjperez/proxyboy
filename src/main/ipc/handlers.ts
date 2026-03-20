@@ -9,10 +9,17 @@ import { setSystemProxy, clearSystemProxy, isSystemProxyEnabled } from '../utils
 import { ProxyState, Rule, HttpFlow, CaptureFilterMode, ComposerRequest } from '../../shared/types';
 import { normalizeThrottleSettings, type ThrottleSettings } from '../../shared/throttle';
 import { normalizeUpstreamProxySettings, type UpstreamProxySettings } from '../../shared/upstream-proxy';
+import { UpdateManager } from '../updater';
+import {
+  DEFAULT_PROTOBUF_SETTINGS,
+  normalizeProtobufSettings,
+  type ProtobufDecodeRequest,
+  type ProtobufSettings,
+} from '../../shared/protobuf';
 import { flowsToHar } from '../utils/har';
 import { randomUUID } from 'crypto';
 import { annotateGraphQLRequest } from '../../shared/graphql';
-import { UpdateManager } from '../updater';
+import { decodeProtobufBody, validateProtobufSettings } from '../protobuf/decoder';
 import {
   saveFlow,
   clearAllFlows,
@@ -78,6 +85,7 @@ function hydrateUpstreamProxySettings(serializedSettings: string): UpstreamProxy
     password: safeStorage.decryptString(Buffer.from(encryptedPassword, 'base64')),
   };
 }
+const PROTOBUF_SETTINGS_KEY = 'protobuf:settings';
 
 export function registerIpcHandlers(
   mainWindow: BrowserWindow,
@@ -86,6 +94,7 @@ export function registerIpcHandlers(
 ): void {
   let agentWindow: BrowserWindow | null = null;
   const updateManager = new UpdateManager('pjperez/proxyboy', getAppSetting(AUTO_UPDATE_ENABLED_KEY) !== 'false');
+  let protobufSettings: ProtobufSettings = DEFAULT_PROTOBUF_SETTINGS;
 
   // Broadcast to all windows that care about agent events
   const broadcastAgent = (channel: string, data: any) => {
@@ -219,6 +228,55 @@ export function registerIpcHandlers(
       activeConnections: 0,
       sslEnabled: true,
     };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PROTOBUF_GET_CONFIG, async (): Promise<ProtobufSettings> => {
+    return protobufSettings;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PROTOBUF_SET_CONFIG, async (_event, settings: ProtobufSettings) => {
+    try {
+      const normalizedSettings = normalizeProtobufSettings(settings);
+      validateProtobufSettings(normalizedSettings);
+      protobufSettings = normalizedSettings;
+      setAppSetting(PROTOBUF_SETTINGS_KEY, JSON.stringify(normalizedSettings));
+      return {
+        success: true,
+        settings: protobufSettings,
+      };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PROTOBUF_PICK_PROTO_FILES, async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Select .proto files',
+      properties: ['openFile', 'multiSelections'],
+      filters: [
+        { name: 'Protocol Buffers', extensions: ['proto'] },
+      ],
+    });
+
+    if (result.canceled) {
+      return { success: false, canceled: true, filePaths: [] };
+    }
+
+    return {
+      success: true,
+      filePaths: result.filePaths,
+    };
+  });
+
+  ipcMain.handle(IPC_CHANNELS.PROTOBUF_DECODE_BODY, async (_event, request: ProtobufDecodeRequest) => {
+    try {
+      return {
+        success: true,
+        result: decodeProtobufBody(request, protobufSettings),
+      };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
   });
 
   // Traffic
@@ -356,6 +414,17 @@ export function registerIpcHandlers(
     }
   } catch (err) {
     console.error('Failed to load upstream proxy settings from database:', err);
+  }
+
+  try {
+    const savedProtobufSettings = getAppSetting(PROTOBUF_SETTINGS_KEY);
+    if (savedProtobufSettings) {
+      const normalizedSettings = normalizeProtobufSettings(JSON.parse(savedProtobufSettings));
+      validateProtobufSettings(normalizedSettings);
+      protobufSettings = normalizedSettings;
+    }
+  } catch (err) {
+    console.error('Failed to load protobuf settings from database:', err);
   }
 
   agentClient.setRuleManager({

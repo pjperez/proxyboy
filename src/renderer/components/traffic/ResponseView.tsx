@@ -4,9 +4,10 @@ import type { HttpResponse } from '../../../shared/types';
 
 interface Props {
   response: HttpResponse;
+  requestPath?: string;
 }
 
-export default function ResponseView({ response }: Props) {
+export default function ResponseView({ response, requestPath }: Props) {
   const statusColor = response.statusCode < 300 ? 'text-pb-success' :
                       response.statusCode < 400 ? 'text-pb-warning' : 'text-pb-error';
 
@@ -47,6 +48,8 @@ export default function ResponseView({ response }: Props) {
             body={String(response.body)}
             contentType={String(response.headers['content-type'] || '')}
             isBase64={(response as any)._isBase64}
+            requestPath={requestPath}
+            direction="response"
           />
         </section>
       )}

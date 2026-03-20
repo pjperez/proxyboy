@@ -137,7 +137,7 @@ export default function TrafficDetail({ flow, comparisonFlow = null, onClearComp
           </div>
         )}
         {tab === 'request' && <RequestView request={flow.request} />}
-        {tab === 'response' && flow.response && <ResponseView response={flow.response} />}
+        {tab === 'response' && flow.response && <ResponseView response={flow.response} requestPath={flow.request.path} />}
         {tab === 'response' && !flow.response && (
           <div className="text-pb-text-dim text-sm">Waiting for response...</div>
         )}

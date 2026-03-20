@@ -60,6 +60,12 @@ export const IPC_CHANNELS = {
   APP_IMPORT_HAR: 'app:import-har',
   APP_PICK_FILE: 'app:pick-file',
 
+  // Protobuf
+  PROTOBUF_GET_CONFIG: 'protobuf:get-config',
+  PROTOBUF_SET_CONFIG: 'protobuf:set-config',
+  PROTOBUF_PICK_PROTO_FILES: 'protobuf:pick-proto-files',
+  PROTOBUF_DECODE_BODY: 'protobuf:decode-body',
+ 
   // DNS
   DNS_GET_CONFIG: 'dns:get-config',
   DNS_SET_SERVERS: 'dns:set-servers',
