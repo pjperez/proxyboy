@@ -48,4 +48,21 @@ describe('annotateGraphQLRequest', () => {
     expect(request.graphqlOperationName).toBe('OnMessage');
     expect(tags).toContain('graphql');
   });
+
+  it('removes stale graphql tags when a request no longer parses as graphql', () => {
+    const request: Pick<HttpRequest, 'method' | 'headers' | 'body'> & Partial<HttpRequest> = {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ hello: 'world' }),
+      graphqlOperationName: 'OldOperation',
+      graphqlOperationType: 'query',
+    };
+    const tags = ['graphql', 'edited'];
+
+    annotateGraphQLRequest(request, tags);
+
+    expect(request.graphqlOperationType).toBeUndefined();
+    expect(request.graphqlOperationName).toBeUndefined();
+    expect(tags).toEqual(['edited']);
+  });
 });

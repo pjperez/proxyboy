@@ -26,6 +26,12 @@ interface Props {
   flows: HttpFlow[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onEditAndResend: (flow: HttpFlow) => void;
+  markedFlowId: string | null;
+  compareTargetFlowId: string | null;
+  onMarkForCompare: (flow: HttpFlow) => void;
+  onCompareWithMarked: (flow: HttpFlow) => void;
+  onClearComparison: () => void;
 }
 
 function getContentType(headers?: HttpHeaders): string {
@@ -39,6 +45,12 @@ function getContentType(headers?: HttpHeaders): string {
   if (ct.includes('image')) return 'Image';
   if (ct.includes('text')) return 'Text';
   return ct.split(';')[0].split('/').pop() || '';
+}
+
+function getFlowContentType(flow: HttpFlow): string {
+  if (flow.streamKind === 'websocket') return 'WebSocket';
+  if (flow.streamKind === 'sse') return 'SSE';
+  return getContentType(flow.response?.headers);
 }
 
 function formatHeaders(headers: HttpHeaders): string {
@@ -79,7 +91,7 @@ function getSortValue(flow: HttpFlow, column: ColumnKey): string | number {
         ?? (flow.tags.includes('graphql') ? 'graphql' : '');
     case 'url': return flow.request.path || flow.request.url;
     case 'host': return flow.request.host;
-    case 'type': return getContentType(flow.response?.headers);
+    case 'type': return getFlowContentType(flow);
     case 'size': return flow.response?.bodySize ?? 0;
     case 'time': return flow.response?.duration ?? 0;
   }
@@ -135,7 +147,17 @@ function saveVisibleColumns(columns: Set<ColumnKey>) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify([...columns]));
 }
 
-export default function TrafficList({ flows, selectedId, onSelect }: Props) {
+export default function TrafficList({
+  flows,
+  selectedId,
+  onSelect,
+  onEditAndResend,
+  markedFlowId,
+  compareTargetFlowId,
+  onMarkForCompare,
+  onCompareWithMarked,
+  onClearComparison,
+}: Props) {
   const trafficRowColorMode = useAppStore((state) => state.trafficRowColorMode);
   const [sort, setSort] = useState<SortState>({ column: null, direction: 'asc' });
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
@@ -244,7 +266,34 @@ export default function TrafficList({ flows, selectedId, onSelect }: Props) {
   }, []);
 
   const buildMenuItems = useCallback((flow: HttpFlow): ContextMenuItem[] => {
+    const compareItems: ContextMenuItem[] = [];
+
+    if (flow.response) {
+      if (markedFlowId === flow.id || compareTargetFlowId === flow.id) {
+        compareItems.push({
+          label: 'Clear comparison state',
+          icon: '✕',
+          onClick: onClearComparison,
+        });
+      } else {
+        compareItems.push({
+          label: 'Mark response for compare',
+          icon: '🎯',
+          onClick: () => onMarkForCompare(flow),
+        });
+      }
+
+      if (markedFlowId && markedFlowId !== flow.id) {
+        compareItems.push({
+          label: 'Compare with marked',
+          icon: '🔀',
+          onClick: () => onCompareWithMarked(flow),
+        });
+      }
+    }
+
     return [
+      ...compareItems,
       {
         label: 'Block this domain',
         icon: '🛑',
@@ -254,6 +303,11 @@ export default function TrafficList({ flows, selectedId, onSelect }: Props) {
         label: 'Allow only this domain',
         icon: '✅',
         onClick: () => quickAddCaptureRule(flow, 'allow-list'),
+      },
+      {
+        label: 'Edit and Resend',
+        icon: '✍️',
+        onClick: () => onEditAndResend(flow),
       },
       {
         label: 'Repeat Request',
@@ -299,7 +353,7 @@ export default function TrafficList({ flows, selectedId, onSelect }: Props) {
         },
       },
     ];
-  }, [quickAddCaptureRule]);
+  }, [compareTargetFlowId, markedFlowId, onClearComparison, onCompareWithMarked, onEditAndResend, onMarkForCompare, quickAddCaptureRule]);
 
   if (flows.length === 0) {
     return (
@@ -372,6 +426,8 @@ export default function TrafficList({ flows, selectedId, onSelect }: Props) {
             onContextMenu={handleContextMenu}
             visibleColumns={visibleColumns}
             colorMode={trafficRowColorMode}
+            markedForCompare={flow.id === markedFlowId}
+            comparisonTarget={flow.id === compareTargetFlowId}
             columnKey={columnKey}
           />
         )}

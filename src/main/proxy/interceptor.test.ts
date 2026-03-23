@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import type { MapRemoteRule } from '../../shared/types';
 import { Interceptor } from './interceptor';
+import type { HttpFlow } from '../../shared/types';
 
 describe('Interceptor regex hardening', () => {
   it('allows straightforward URL regex rules', () => {
@@ -97,5 +99,81 @@ describe('Interceptor capture filters', () => {
 
     expect(interceptor.shouldCapture('https://example.com/api/users', 'GET')).toBe(true);
     expect(interceptor.shouldCapture('https://example.com/static/app.js', 'GET')).toBe(true);
+  });
+});
+
+describe('Interceptor map remote rules', () => {
+  it('returns the first enabled map-remote rule that matches the request', () => {
+    const interceptor = new Interceptor();
+    const mapRemoteRule: MapRemoteRule = {
+      id: 'map-remote-api',
+      type: 'map-remote',
+      name: 'Route API to staging',
+      enabled: true,
+      matchCriteria: { urlPattern: '*://api.example.com/*', methods: ['GET'] },
+      destinationUrl: 'https://staging.example.net',
+      preservePath: true,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    interceptor.setRules([mapRemoteRule]);
+
+    const matchedRule = interceptor.getMapRemoteRule('https://api.example.com/users', 'GET');
+    expect(matchedRule?.destinationUrl).toBe('https://staging.example.net');
+    expect(interceptor.getMapRemoteRule('https://api.example.com/users', 'POST')).toBeNull();
+  });
+});
+
+describe('Interceptor breakpoint resume payloads', () => {
+  it('returns the full resume payload for paused flows', async () => {
+    const interceptor = new Interceptor();
+    const flow: HttpFlow = {
+      id: 'flow-1',
+      state: 'paused',
+      tags: [],
+      createdAt: Date.now(),
+      request: {
+        id: 'req-1',
+        method: 'POST',
+        url: 'https://example.com/api',
+        protocol: 'https',
+        host: 'example.com',
+        path: '/api',
+        headers: { host: 'example.com' },
+        body: Buffer.from('hello'),
+        bodySize: 5,
+        timestamp: Date.now(),
+      },
+    };
+
+    const paused = interceptor.pauseFlow(flow.id, flow);
+    interceptor.resumeFlow(flow.id, {
+      flowId: flow.id,
+      action: 'forward',
+      request: {
+        headers: {
+          host: 'example.com',
+          'x-breakpoint': 'edited',
+        },
+        body: {
+          data: 'patched',
+          encoding: 'utf8',
+        },
+      },
+    });
+
+    await expect(paused).resolves.toMatchObject({
+      flowId: flow.id,
+      action: 'forward',
+      request: {
+        headers: {
+          'x-breakpoint': 'edited',
+        },
+        body: {
+          data: 'patched',
+          encoding: 'utf8',
+        },
+      },
+    });
   });
 });

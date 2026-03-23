@@ -9,8 +9,13 @@ interface Props {
 
 const navItems = [
   { id: 'traffic', label: 'Traffic', icon: '📡' },
+  { id: 'composer', label: 'Composer', icon: '✍️' },
   { id: 'breakpoints', label: 'Breakpoints', icon: '⏸' },
   { id: 'map-local', label: 'Map Local', icon: '📁' },
+  { id: 'map-remote', label: 'Map Remote', icon: '🌐' },
+  { id: 'scripts', label: 'Scripts', icon: '📜' },
+  { id: 'map-remote', label: 'Map Remote', icon: '🌐' },
+  { id: 'scripts', label: 'Scripts', icon: '📜' },
   { id: 'capture-rules', label: 'Capture Rules', icon: '🛡' },
   { id: 'settings', label: 'Settings', icon: '⚙' },
 ];

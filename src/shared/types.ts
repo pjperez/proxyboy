@@ -1,3 +1,6 @@
+import type { ResolvedThrottleProfile, ThrottleSettings } from './throttle';
+import type { UpstreamProxySettings } from './upstream-proxy';
+
 // Core HTTP flow types
 export interface HttpHeaders {
   [key: string]: string | string[];
@@ -32,6 +35,27 @@ export interface HttpResponse {
   duration: number;
 }
 
+export interface WebSocketFrame {
+  id: string;
+  timestamp: number;
+  direction: 'client-to-server' | 'server-to-client';
+  frameType: 'message' | 'ping' | 'pong' | 'close';
+  body: string;
+  isBase64?: boolean;
+  byteLength: number;
+  truncated?: boolean;
+}
+
+export interface SseEvent {
+  id: string;
+  event?: string;
+  data: string;
+  timestamp: number;
+  retry?: number;
+  byteLength: number;
+  truncated?: boolean;
+}
+
 export interface HttpFlow {
   id: string;
   request: HttpRequest;
@@ -39,8 +63,23 @@ export interface HttpFlow {
   state: FlowState;
   tags: string[];
   notes?: string;
+  composerRequestId?: string;
   createdAt: number;
   timing?: FlowTiming;
+  streamKind?: 'websocket' | 'sse';
+  streamOpen?: boolean;
+  websocketFrames?: WebSocketFrame[];
+  sseEvents?: SseEvent[];
+}
+
+export interface TrafficFlowUpdate {
+  id: string;
+  streamKind?: 'websocket' | 'sse';
+  streamOpen?: boolean;
+  tags?: string[];
+  notes?: string;
+  appendWebSocketFrames?: WebSocketFrame[];
+  appendSseEvents?: SseEvent[];
 }
 
 export interface FlowTiming {
@@ -74,9 +113,24 @@ export interface ProxyState {
   host: string;
   isSystemProxy: boolean;
   noCacheEnabled: boolean;
+  throttleSettings: ThrottleSettings;
+  throttleProfile: ResolvedThrottleProfile;
+  upstreamProxySettings: UpstreamProxySettings;
   totalRequests: number;
   activeConnections: number;
   sslEnabled: boolean;
+}
+
+export interface AppUpdateState {
+  supported: boolean;
+  enabled: boolean;
+  checking: boolean;
+  updateAvailable: boolean;
+  updateDownloaded: boolean;
+  currentVersion: string;
+  latestVersion?: string;
+  lastCheckedAt?: number;
+  error?: string;
 }
 
 // Filter types
@@ -101,7 +155,8 @@ export interface StatusCodeRange {
 
 // Rule types
 export type CaptureFilterMode = 'capture-all' | 'allow-list' | 'block-list';
-export type RuleType = 'breakpoint' | 'map-local' | 'allow-list' | 'block-list';
+export type ScriptPhase = 'request' | 'response' | 'both';
+export type RuleType = 'breakpoint' | 'map-local' | 'map-remote' | 'allow-list' | 'block-list' | 'script';
 
 export interface Rule {
   id: string;
@@ -131,12 +186,33 @@ export interface MapLocalRule extends Rule {
   responseHeaders?: HttpHeaders;
 }
 
+export interface MapRemoteRule extends Rule {
+  type: 'map-remote';
+  destinationUrl: string;
+  preservePath?: boolean;
+}
+
 export interface AllowListRule extends Rule {
   type: 'allow-list';
 }
 
 export interface BlockListRule extends Rule {
   type: 'block-list';
+}
+
+export interface ScriptRule extends Rule {
+  type: 'script';
+  phase: ScriptPhase;
+  code: string;
+}
+
+export interface ScriptTestResult {
+  success: boolean;
+  blocked?: boolean;
+  notes?: string[];
+  request?: HttpRequest;
+  response?: HttpResponse;
+  error?: string;
 }
 
 // Agent types
@@ -182,13 +258,47 @@ export interface TrafficUpdateMessage {
   flow: HttpFlow;
 }
 
+export interface BreakpointPauseRequest extends Omit<HttpRequest, 'body'> {
+  body?: StoredBody;
+}
+
+export interface BreakpointPauseResponse extends Omit<HttpResponse, 'body'> {
+  body?: StoredBody;
+}
+
+export interface BreakpointPauseFlow extends Omit<HttpFlow, 'request' | 'response'> {
+  request: BreakpointPauseRequest;
+  response?: BreakpointPauseResponse;
+}
+
 export interface BreakpointPauseMessage {
   flowId: string;
-  flow: HttpFlow;
+  flow: BreakpointPauseFlow;
   phase: 'request' | 'response';
+}
+
+export interface BreakpointRequestEdits {
+  headers: HttpHeaders;
+  body?: StoredBody;
+}
+
+export interface BreakpointResponseEdits {
+  statusCode: number;
+  statusMessage: string;
+  headers: HttpHeaders;
+  body?: StoredBody;
 }
 
 export interface BreakpointResumeMessage {
   flowId: string;
   action: 'forward' | 'drop';
+  request?: BreakpointRequestEdits;
+  response?: BreakpointResponseEdits;
+}
+
+export interface ComposerRequest {
+  method: string;
+  url: string;
+  headers: HttpHeaders;
+  body?: string;
 }

@@ -1,6 +1,9 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../shared/constants';
-import type { ProxyState, HttpFlow, Rule, FilterCriteria, CaptureFilterMode } from '../shared/types';
+import type { BreakpointPauseMessage, BreakpointResumeMessage, ProxyState, HttpFlow, Rule, FilterCriteria, CaptureFilterMode, ComposerRequest, AppUpdateState, ScriptRule, ScriptTestResult, TrafficFlowUpdate } from '../shared/types';
+import type { ThrottleSettings } from '../shared/throttle';
+import type { UpstreamProxySettings } from '../shared/upstream-proxy';
+import type { ProtobufDecodeRequest, ProtobufSettings } from '../shared/protobuf';
 
 const api = {
   // Proxy control
@@ -10,6 +13,8 @@ const api = {
     getStatus: (): Promise<ProxyState> => ipcRenderer.invoke(IPC_CHANNELS.PROXY_STATUS),
     setSystemProxy: (enabled: boolean) => ipcRenderer.invoke(IPC_CHANNELS.PROXY_SET_SYSTEM, enabled),
     setNoCache: (enabled: boolean) => ipcRenderer.invoke(IPC_CHANNELS.PROXY_SET_NO_CACHE, enabled),
+    setThrottle: (settings: ThrottleSettings) => ipcRenderer.invoke(IPC_CHANNELS.PROXY_SET_THROTTLE, settings),
+    setUpstreamProxy: (settings: UpstreamProxySettings) => ipcRenderer.invoke(IPC_CHANNELS.PROXY_SET_UPSTREAM, settings),
     installCert: () => ipcRenderer.invoke(IPC_CHANNELS.PROXY_INSTALL_CERT),
     getCertStatus: () => ipcRenderer.invoke(IPC_CHANNELS.PROXY_CERT_STATUS),
   },
@@ -23,6 +28,8 @@ const api = {
     clear: () => ipcRenderer.invoke(IPC_CHANNELS.TRAFFIC_CLEAR),
     delete: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TRAFFIC_DELETE, id),
     repeat: (id: string) => ipcRenderer.invoke(IPC_CHANNELS.TRAFFIC_REPEAT, id),
+    compose: (request: ComposerRequest): Promise<{ success: boolean; composerRequestId?: string; captured?: boolean; error?: string }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.TRAFFIC_COMPOSE, request),
     onNewFlow: (callback: (flow: HttpFlow) => void) => {
       const handler = (_event: any, flow: HttpFlow) => callback(flow);
       ipcRenderer.on(IPC_CHANNELS.TRAFFIC_NEW_FLOW, handler);
@@ -32,6 +39,11 @@ const api = {
       const handler = (_event: any, flow: HttpFlow) => callback(flow);
       ipcRenderer.on(IPC_CHANNELS.TRAFFIC_FLOW_COMPLETE, handler);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.TRAFFIC_FLOW_COMPLETE, handler);
+    },
+    onFlowUpdated: (callback: (flow: TrafficFlowUpdate) => void) => {
+      const handler = (_event: any, flow: TrafficFlowUpdate) => callback(flow);
+      ipcRenderer.on(IPC_CHANNELS.TRAFFIC_FLOW_UPDATED, handler);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.TRAFFIC_FLOW_UPDATED, handler);
     },
   },
 
@@ -54,15 +66,20 @@ const api = {
     },
   },
 
+  scripts: {
+    test: (rule: Omit<ScriptRule, 'id' | 'createdAt' | 'updatedAt'>, flowId: string): Promise<ScriptTestResult> =>
+      ipcRenderer.invoke(IPC_CHANNELS.SCRIPT_TEST, { rule, flowId }),
+  },
+
   // Breakpoint
   breakpoint: {
-    onPaused: (callback: (data: { flowId: string; flow: HttpFlow; phase: string }) => void) => {
-      const handler = (_event: any, data: any) => callback(data);
+    onPaused: (callback: (data: BreakpointPauseMessage) => void) => {
+      const handler = (_event: any, data: BreakpointPauseMessage) => callback(data);
       ipcRenderer.on(IPC_CHANNELS.BREAKPOINT_PAUSED, handler);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.BREAKPOINT_PAUSED, handler);
     },
-    resume: (flowId: string, action: 'forward' | 'drop') =>
-      ipcRenderer.invoke(IPC_CHANNELS.BREAKPOINT_RESUME, { flowId, action }),
+    resume: (data: BreakpointResumeMessage) =>
+      ipcRenderer.invoke(IPC_CHANNELS.BREAKPOINT_RESUME, data),
   },
 
   // Agent
@@ -106,9 +123,25 @@ const api = {
   // App
   app: {
     getVersion: () => ipcRenderer.invoke(IPC_CHANNELS.APP_GET_VERSION),
+    getUpdateState: (): Promise<AppUpdateState> => ipcRenderer.invoke(IPC_CHANNELS.APP_GET_UPDATE_STATE),
+    checkForUpdates: () => ipcRenderer.invoke(IPC_CHANNELS.APP_CHECK_FOR_UPDATES),
+    setAutoUpdateEnabled: (enabled: boolean) => ipcRenderer.invoke(IPC_CHANNELS.APP_SET_AUTO_UPDATE_ENABLED, enabled),
+    installUpdate: () => ipcRenderer.invoke(IPC_CHANNELS.APP_INSTALL_UPDATE),
+    onUpdateState: (callback: (state: AppUpdateState) => void) => {
+      const handler = (_event: any, state: AppUpdateState) => callback(state);
+      ipcRenderer.on(IPC_CHANNELS.APP_UPDATE_STATE, handler);
+      return () => ipcRenderer.removeListener(IPC_CHANNELS.APP_UPDATE_STATE, handler);
+    },
     exportHar: (flowIds?: string[]) => ipcRenderer.invoke(IPC_CHANNELS.APP_EXPORT_HAR, flowIds),
     importHar: () => ipcRenderer.invoke(IPC_CHANNELS.APP_IMPORT_HAR),
     pickFile: () => ipcRenderer.invoke(IPC_CHANNELS.APP_PICK_FILE),
+  },
+
+  protobuf: {
+    getConfig: (): Promise<ProtobufSettings> => ipcRenderer.invoke(IPC_CHANNELS.PROTOBUF_GET_CONFIG),
+    setConfig: (settings: ProtobufSettings) => ipcRenderer.invoke(IPC_CHANNELS.PROTOBUF_SET_CONFIG, settings),
+    pickProtoFiles: () => ipcRenderer.invoke(IPC_CHANNELS.PROTOBUF_PICK_PROTO_FILES),
+    decodeBody: (request: ProtobufDecodeRequest) => ipcRenderer.invoke(IPC_CHANNELS.PROTOBUF_DECODE_BODY, request),
   },
 
   // Debug

@@ -17,16 +17,23 @@ ProxyBoy is a man-in-the-middle (MITM) HTTP/HTTPS proxy that captures, inspects,
 - **Traffic Capture** — Intercept HTTP and HTTPS traffic with automatic SSL certificate generation
 - **Request/Response Inspector** — View headers, bodies (JSON, HTML, XML, images), timing, and metadata
 - **GraphQL Awareness** — Detect GraphQL operations, show operation names, and filter traffic by operation
+- **Protobuf / gRPC Decoding** — Decode protobuf payloads in the detail view with `.proto` files and fall back to raw field inspection when schemas are missing
 - **No Cache Toggle** — Strip cache validators and return `Cache-Control: no-store` to force fresh responses
+- **Network Throttling** — Simulate slower links with preset or custom upload, download, and latency profiles
+- **Request Composer** — Build a request from scratch, send it through ProxyBoy, and inspect the captured result inline
+- **Upstream Proxy Chaining** — Forward traffic through HTTP or SOCKS5 upstream proxies with bypass patterns and secure credential storage
 - **Cookie Inspector** — Parse request cookies and `Set-Cookie` headers into a structured, searchable view
 - **AI Assistant** — Chat panel powered by GitHub Copilot that can search traffic, analyze patterns, create rules, and export data
 - **Breakpoint Rules** — Pause requests/responses mid-flight, inspect them, then forward or drop
 - **Map Local Rules** — Serve local files instead of remote responses for mocking APIs
+- **Map Remote Rules** — Forward matching requests to a different upstream host without changing your client
 - **Capture Rules** — Switch between capture-all, allow-list, and block-list modes to control what gets recorded
 - **System Proxy Integration** — Toggle Windows system proxy on/off from the app
 - **HAR Export/Import** — Standard HAR format for sharing captures with other tools
 - **Configurable Columns** — Show/hide columns, sort by any field, timestamps
 - **Body Search** — Include request and response text bodies in traffic filtering when you need deeper search
+- **WebSocket and SSE Inspection** — Capture live WebSocket frames and Server-Sent Events in the traffic detail view
+- **Script Rules** — Run sandboxed JavaScript rules to rewrite requests and responses without leaving the app
 - **Copy as cURL** — Right-click any request to copy it as a cURL command
 - **Keyboard Shortcuts** — Fast access to proxy control, HAR import/export, filtering, and traffic actions
 - **Theme Modes** — Dark, Light, or System theme selection with live switching
@@ -107,7 +114,7 @@ Output goes to `out/make/`.
 1. **Start the proxy** — Click the play button in the status bar or use the AI assistant
 2. **Route traffic** — Either toggle "System Proxy" in settings, or manually configure your browser/app to use `127.0.0.1:9090`
 3. **Inspect** — Click any row to see request/response details
-4. **Create rules** — Use the Breakpoints or Map Local views, or ask the AI assistant
+4. **Create rules** — Use the Breakpoints, Map Local, or Map Remote views, or ask the AI assistant
 5. **AI Assistant** — Click the robot icon in the sidebar or press `Ctrl+Shift+A`
 
 ### SSL/HTTPS

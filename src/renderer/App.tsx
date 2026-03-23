@@ -7,8 +7,11 @@ import TrafficList from './components/traffic/TrafficList';
 import TrafficDetail from './components/traffic/TrafficDetail';
 import FilterBar from './components/filters/FilterBar';
 import AgentPanel from './components/agent/AgentPanel';
+import ComposerPanel from './components/composer/ComposerPanel';
 import BreakpointEditor from './components/rules/BreakpointEditor';
 import MapLocalEditor from './components/rules/MapLocalEditor';
+import MapRemoteEditor from './components/rules/MapRemoteEditor';
+import ScriptEditor from './components/rules/ScriptEditor';
 import CaptureFilterEditor from './components/rules/CaptureFilterEditor';
 import SettingsPanel from './components/settings/SettingsPanel';
 import BreakpointPauseDialog from './components/rules/BreakpointPauseDialog';
@@ -19,6 +22,8 @@ import { flowToCurl } from './utils/curl';
 import { clearTrafficFlows, deleteTrafficFlow, exportHarFile, importHarFile, toggleProxyRecording } from './utils/app-actions';
 import { getNextSelectedFlowIdAfterDelete } from './utils/shortcuts';
 import { applyThemePreference, watchSystemTheme } from './utils/theme';
+import { normalizeThrottleSettings } from '../shared/throttle';
+import type { BreakpointPauseMessage, BreakpointResumeMessage, ComposerRequest, HttpFlow } from '../shared/types';
 
 declare global {
   interface Window {
@@ -26,7 +31,24 @@ declare global {
   }
 }
 
-type View = 'traffic' | 'breakpoints' | 'map-local' | 'capture-rules' | 'settings';
+type View = 'traffic' | 'composer' | 'breakpoints' | 'map-local' | 'map-remote' | 'scripts' | 'capture-rules' | 'settings';
+
+function buildComposerDraftFromFlow(flow: HttpFlow): ComposerRequest {
+  const body = (flow.request as any)._isBase64
+    ? ''
+    : typeof flow.request.body === 'string'
+      ? flow.request.body
+      : flow.request.body
+        ? String(flow.request.body)
+        : undefined;
+
+  return {
+    method: flow.request.method,
+    url: flow.request.url,
+    headers: flow.request.headers,
+      body,
+  };
+}
 
 // Detect if this is the detached agent window
 const isAgentWindow = new URLSearchParams(window.location.search).get('view') === 'agent';
@@ -44,6 +66,7 @@ export default function App() {
 
 function MainApp() {
   const [selectedView, setSelectedView] = useState<View>('traffic');
+  const [composerDraft, setComposerDraft] = useState<ComposerRequest | null>(null);
   const [showAgent, setShowAgent] = useState(false);
   const [agentDetached, setAgentDetached] = useState(false);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
@@ -72,17 +95,23 @@ function MainApp() {
     setShowAgent(false);
   }, []);
 
-  const [breakpointPause, setBreakpointPause] = useState<{flowId: string; flow: any; phase: string} | null>(null);
+  const [breakpointQueue, setBreakpointQueue] = useState<BreakpointPauseMessage[]>([]);
+  const breakpointPause = breakpointQueue[0] ?? null;
 
   const flows = useTrafficStore(s => s.flows);
   const filter = useTrafficStore(s => s.filter);
+  const markedFlowId = useTrafficStore(s => s.markedFlowId);
+  const compareTargetFlowId = useTrafficStore(s => s.compareTargetFlowId);
   const setFlows = useTrafficStore(s => s.setFlows);
   const addFlow = useTrafficStore(s => s.addFlow);
   const updateFlow = useTrafficStore(s => s.updateFlow);
   const removeFlow = useTrafficStore(s => s.removeFlow);
+  const setMarkedFlowId = useTrafficStore(s => s.setMarkedFlowId);
+  const setCompareTargetFlowId = useTrafficStore(s => s.setCompareTargetFlowId);
+  const clearComparison = useTrafficStore(s => s.clearComparison);
   const getFilteredFlows = useTrafficStore(s => s.getFilteredFlows);
   const { addRule } = useRulesStore();
-  const { proxyRunning, setProxyRunning, setNoCacheEnabled, theme } = useAppStore();
+  const { proxyRunning, setProxyRunning, setNoCacheEnabled, setThrottleSettings, setUpdateState, theme } = useAppStore();
 
   useEffect(() => {
     const syncTheme = () => {
@@ -104,6 +133,9 @@ function MainApp() {
     const unsubNew = api.traffic.onNewFlow((flow: any) => {
       addFlow(flow);
     });
+    const unsubUpdated = api.traffic.onFlowUpdated((flow: any) => {
+      updateFlow(flow);
+    });
     const unsubComplete = api.traffic.onFlowComplete((flow: any) => {
       updateFlow(flow);
     });
@@ -114,8 +146,11 @@ function MainApp() {
       setAgentDetached(false);
     });
 
-    const unsubBreakpoint = api.breakpoint?.onPaused?.((data: any) => {
-      setBreakpointPause(data);
+    const unsubBreakpoint = api.breakpoint?.onPaused?.((data: BreakpointPauseMessage) => {
+      setBreakpointQueue((current) => [...current, data]);
+    });
+    const unsubUpdateState = api.app.onUpdateState((state: any) => {
+      setUpdateState(state);
     });
 
     api.traffic.getFlows().then((loadedFlows: any[]) => {
@@ -124,9 +159,16 @@ function MainApp() {
       }
     }).catch(() => {});
 
+    api.app.getUpdateState().then((state: any) => {
+      if (state?.currentVersion) {
+        setUpdateState(state);
+      }
+    }).catch(() => {});
+
     api.proxy.getStatus().then((status: any) => {
       setProxyRunning(status.running);
       setNoCacheEnabled(!!status.noCacheEnabled);
+      setThrottleSettings(normalizeThrottleSettings(status.throttleSettings));
       if (status.port) {
         useAppStore.getState().setProxyPort(status.port);
       }
@@ -143,9 +185,11 @@ function MainApp() {
 
     return () => {
       unsubNew();
+      unsubUpdated();
       unsubComplete();
       unsubRuleCreated?.();
       unsubBreakpoint?.();
+      unsubUpdateState?.();
       unsubAgentClosed();
     };
   }, []);
@@ -155,6 +199,17 @@ function MainApp() {
     () => selectedFlowId ? flows.find(f => f.id === selectedFlowId) ?? null : null,
     [flows, selectedFlowId]
   );
+  const markedFlow = useMemo(
+    () => markedFlowId ? flows.find((flow) => flow.id === markedFlowId) ?? null : null,
+    [flows, markedFlowId],
+  );
+  const comparisonFlow = useMemo(() => {
+    if (!selectedFlow || compareTargetFlowId !== selectedFlow.id || !markedFlow || markedFlow.id === selectedFlow.id) {
+      return null;
+    }
+
+    return markedFlow;
+  }, [compareTargetFlowId, markedFlow, selectedFlow]);
 
   useEffect(() => {
     if (selectedFlowId && !flows.some((flow) => flow.id === selectedFlowId)) {
@@ -260,6 +315,41 @@ function MainApp() {
     setSelectedFlowId(nextSelectedFlowId);
   }, [filteredFlows, removeFlow, selectedFlowId, selectedView, showActionError]);
 
+  const handleMarkFlowForCompare = useCallback((flow: typeof flows[number]) => {
+    if (!flow.response) {
+      showActionError('Wait for the response to complete before marking it for comparison.');
+      return;
+    }
+
+    setMarkedFlowId(flow.id);
+    if (compareTargetFlowId === flow.id) {
+      setCompareTargetFlowId(null);
+    }
+  }, [compareTargetFlowId, setCompareTargetFlowId, setMarkedFlowId, showActionError]);
+
+  const handleCompareWithMarked = useCallback((flow: typeof flows[number]) => {
+    if (!flow.response) {
+      showActionError('Wait for the response to complete before comparing it.');
+      return;
+    }
+    if (!markedFlowId) {
+      showActionError('Mark another response first.');
+      return;
+    }
+    if (markedFlowId === flow.id) {
+      showActionError('Choose a different response to compare against the marked one.');
+      return;
+    }
+
+    setSelectedFlowId(flow.id);
+    setCompareTargetFlowId(flow.id);
+  }, [markedFlowId, setCompareTargetFlowId, showActionError]);
+
+  const handleEditAndResend = useCallback((flow: HttpFlow) => {
+    setComposerDraft(buildComposerDraftFromFlow(flow));
+    setSelectedView('composer');
+  }, []);
+
   const dismissPanels = useCallback((): boolean => {
     if (showShortcutHelp) {
       setShowShortcutHelp(false);
@@ -318,6 +408,22 @@ function MainApp() {
       if (e.ctrlKey && e.shiftKey && key === 'c') {
         e.preventDefault();
         void handleCopySelectedFlowAsCurl();
+        return;
+      }
+
+      if (e.ctrlKey && e.shiftKey && key === 'm') {
+        e.preventDefault();
+        if (selectedView === 'traffic' && selectedFlow) {
+          handleMarkFlowForCompare(selectedFlow);
+        }
+        return;
+      }
+
+      if (e.ctrlKey && e.shiftKey && key === 'v') {
+        e.preventDefault();
+        if (selectedView === 'traffic' && selectedFlow) {
+          handleCompareWithMarked(selectedFlow);
+        }
         return;
       }
 
@@ -396,12 +502,15 @@ function MainApp() {
     filteredFlows,
     focusTrafficFilter,
     handleClearTraffic,
+    handleCompareWithMarked,
     handleCopySelectedFlowAsCurl,
     handleDeleteSelectedFlow,
     handleExportHar,
     handleImportHar,
+    handleMarkFlowForCompare,
     handleProxyToggle,
     handleToggleDetail,
+    selectedFlow,
     selectedFlowId,
     selectedView,
     showShortcutHelp,
@@ -433,12 +542,21 @@ function MainApp() {
                     flows={filteredFlows}
                     selectedId={selectedFlowId}
                     onSelect={setSelectedFlowId}
+                    onEditAndResend={handleEditAndResend}
+                    markedFlowId={markedFlowId}
+                    compareTargetFlowId={compareTargetFlowId}
+                    onMarkForCompare={handleMarkFlowForCompare}
+                    onCompareWithMarked={handleCompareWithMarked}
+                    onClearComparison={clearComparison}
                   />
                 </div>
                 {selectedFlow && (
                   <div className="w-1/2 overflow-hidden">
                     <TrafficDetail
+                      key={selectedFlow.id}
                       flow={selectedFlow}
+                      comparisonFlow={comparisonFlow}
+                      onClearComparison={clearComparison}
                       onClose={() => setSelectedFlowId(null)}
                     />
                   </div>
@@ -446,8 +564,13 @@ function MainApp() {
               </div>
             </>
           )}
+          {selectedView === 'composer' && <ComposerPanel draft={composerDraft} />}
           {selectedView === 'breakpoints' && <BreakpointEditor />}
           {selectedView === 'map-local' && <MapLocalEditor />}
+          {selectedView === 'map-remote' && <MapRemoteEditor />}
+          {selectedView === 'scripts' && <ScriptEditor selectedFlowId={selectedFlowId} />}
+          {selectedView === 'map-remote' && <MapRemoteEditor />}
+          {selectedView === 'scripts' && <ScriptEditor selectedFlowId={selectedFlowId} />}
           {selectedView === 'capture-rules' && <CaptureFilterEditor />}
           {selectedView === 'settings' && <SettingsPanel />}
         </div>
@@ -473,12 +596,10 @@ function MainApp() {
       )}
       {breakpointPause && (
         <BreakpointPauseDialog
-          flowId={breakpointPause.flowId}
-          flow={breakpointPause.flow}
-          phase={breakpointPause.phase as 'request' | 'response'}
-          onResume={(flowId, action) => {
-            window.proxyboy?.breakpoint.resume(flowId, action);
-            setBreakpointPause(null);
+          pause={breakpointPause}
+          onResume={(data: BreakpointResumeMessage) => {
+            window.proxyboy?.breakpoint.resume(data);
+            setBreakpointQueue((current) => current.slice(1));
           }}
         />
       )}

@@ -2,16 +2,34 @@ import React, { useState, useEffect } from 'react';
 import { useAppStore } from '../../stores/app';
 import type { TrafficRowColorMode } from '../../utils/traffic-row-colors';
 import { resolveThemePreference } from '../../utils/theme';
+import {
+  THROTTLE_PROFILE_PRESETS,
+  normalizeCustomThrottleProfile,
+  normalizeThrottleSettings,
+  resolveThrottleProfile,
+  type ThrottleProfileId,
+} from '../../../shared/throttle';
+import {
+  DEFAULT_UPSTREAM_PROXY_SETTINGS,
+  normalizeUpstreamProxySettings,
+  type UpstreamProxySettings,
+  type UpstreamProxyType,
+} from '../../../shared/upstream-proxy';
+import { normalizeProtobufSettings } from '../../../shared/protobuf';
 
 export default function SettingsPanel() {
   const {
     proxyPort,
     theme,
     noCacheEnabled,
+    throttleSettings,
     trafficRowColorMode,
+    updateState,
     setNoCacheEnabled,
+    setThrottleSettings,
     setTheme,
     setTrafficRowColorMode,
+    setUpdateState,
   } = useAppStore();
   const [autoStart, setAutoStart] = useState(() =>
     localStorage.getItem('proxyboy-auto-start') === 'true'
@@ -22,6 +40,15 @@ export default function SettingsPanel() {
   const [dnsServers, setDnsServers] = useState('');
   const [dnsApplied, setDnsApplied] = useState(false);
   const [dnsError, setDnsError] = useState<string | null>(null);
+  const [throttleDraft, setThrottleDraft] = useState(() => throttleSettings.customProfile);
+  const [throttleError, setThrottleError] = useState<string | null>(null);
+  const [upstreamProxyDraft, setUpstreamProxyDraft] = useState<UpstreamProxySettings>(DEFAULT_UPSTREAM_PROXY_SETTINGS);
+  const [upstreamBypassDraft, setUpstreamBypassDraft] = useState('');
+  const [upstreamApplied, setUpstreamApplied] = useState(false);
+  const [upstreamError, setUpstreamError] = useState<string | null>(null);
+  const [protobufPathsDraft, setProtobufPathsDraft] = useState('');
+  const [protobufApplied, setProtobufApplied] = useState(false);
+  const [protobufError, setProtobufError] = useState<string | null>(null);
 
   useEffect(() => {
     window.proxyboy?.proxy.getCertStatus().then((status: { installed: boolean }) => {
@@ -35,7 +62,21 @@ export default function SettingsPanel() {
         setDnsServers(config.servers.join(', '));
       }
     }).catch(() => {});
+
+    window.proxyboy?.proxy.getStatus().then((status: { upstreamProxySettings?: UpstreamProxySettings }) => {
+      const normalizedSettings = normalizeUpstreamProxySettings(status.upstreamProxySettings);
+      setUpstreamProxyDraft(normalizedSettings);
+      setUpstreamBypassDraft(normalizedSettings.bypassPatterns.join(', '));
+    }).catch(() => {});
+
+    window.proxyboy?.protobuf.getConfig().then((config: { protoFilePaths: string[] }) => {
+      setProtobufPathsDraft(config.protoFilePaths.join('\n'));
+    }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    setThrottleDraft(throttleSettings.customProfile);
+  }, [throttleSettings]);
 
   const handleAutoStartToggle = () => {
     const next = !autoStart;
@@ -61,6 +102,23 @@ export default function SettingsPanel() {
     } finally {
       setInstalling(false);
     }
+  };
+
+  const applyThrottleSettings = async (nextProfileId: ThrottleProfileId, customProfile = throttleDraft) => {
+    const nextSettings = normalizeThrottleSettings({
+      profileId: nextProfileId,
+      customProfile,
+    });
+
+    const result = await window.proxyboy?.proxy.setThrottle(nextSettings);
+    if (result?.success) {
+      setThrottleSettings(normalizeThrottleSettings(result.throttleSettings));
+      setThrottleDraft(normalizeThrottleSettings(result.throttleSettings).customProfile);
+      setThrottleError(null);
+      return;
+    }
+
+    setThrottleError(result?.error || 'Failed to update the throttling profile.');
   };
 
   const handleDnsModeChange = async (mode: 'system' | 'custom') => {
@@ -99,7 +157,95 @@ export default function SettingsPanel() {
     window.proxyboy?.dns.clearCache();
   };
 
+  const handleAutoUpdateToggle = async () => {
+    const result = await window.proxyboy?.app.setAutoUpdateEnabled(!updateState.enabled);
+    if (result?.state) {
+      setUpdateState(result.state);
+    }
+    if (!result?.success) {
+      window.alert(result?.error || 'Failed to update the automatic update setting.');
+    }
+  };
+
+  const handleCheckForUpdates = async () => {
+    const result = await window.proxyboy?.app.checkForUpdates();
+    if (result?.state) {
+      setUpdateState(result.state);
+    }
+    if (!result?.success) {
+      window.alert(result?.error || 'Failed to check for updates.');
+    }
+  };
+
+  const handleInstallUpdate = async () => {
+    const result = await window.proxyboy?.app.installUpdate();
+    if (!result?.success) {
+      window.alert(result?.error || 'Failed to install the downloaded update.');
+    }
+  };
+
+  const handleApplyUpstreamProxy = async () => {
+    const normalizedSettings = normalizeUpstreamProxySettings({
+      ...upstreamProxyDraft,
+      bypassPatterns: upstreamBypassDraft
+        .split(/[,\n]+/)
+        .map((pattern) => pattern.trim())
+        .filter((pattern) => pattern.length > 0),
+    });
+
+    setUpstreamApplied(false);
+    setUpstreamError(null);
+
+    if (normalizedSettings.enabled && !normalizedSettings.host) {
+      setUpstreamError('Enter an upstream proxy host before enabling proxy chaining.');
+      return;
+    }
+
+    const result = await window.proxyboy?.proxy.setUpstreamProxy(normalizedSettings);
+    if (result?.success) {
+      const nextSettings = normalizeUpstreamProxySettings(result.upstreamProxySettings);
+      setUpstreamProxyDraft(nextSettings);
+      setUpstreamBypassDraft(nextSettings.bypassPatterns.join(', '));
+      setUpstreamApplied(true);
+      setTimeout(() => setUpstreamApplied(false), 2000);
+      return;
+    }
+
+    setUpstreamError(result?.error || 'Failed to update the upstream proxy settings.');
+  };
+
+  const handleBrowseProtoFiles = async () => {
+    const result = await window.proxyboy?.protobuf.pickProtoFiles();
+    if (result?.success) {
+      setProtobufPathsDraft(result.filePaths.join('\n'));
+      setProtobufApplied(false);
+      setProtobufError(null);
+    }
+  };
+
+  const handleApplyProtoFiles = async () => {
+    const nextSettings = normalizeProtobufSettings({
+      protoFilePaths: protobufPathsDraft
+        .split(/\r?\n|,/)
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0),
+    });
+
+    const result = await window.proxyboy?.protobuf.setConfig(nextSettings);
+    if (result?.success) {
+      setProtobufPathsDraft(result.settings.protoFilePaths.join('\n'));
+      setProtobufApplied(true);
+      setProtobufError(null);
+      setTimeout(() => setProtobufApplied(false), 2000);
+      return;
+    }
+
+    setProtobufApplied(false);
+    setProtobufError(result?.error || 'Failed to update the configured .proto files.');
+  };
+
   const resolvedTheme = resolveThemePreference(theme);
+  const resolvedThrottleProfile = resolveThrottleProfile(throttleSettings);
 
   return (
     <div className="flex-1 overflow-y-auto p-6">
@@ -120,6 +266,187 @@ export default function SettingsPanel() {
         </Row>
         <Row label="Disable caching for future requests">
           <Toggle checked={noCacheEnabled} onChange={handleNoCacheToggle} />
+        </Row>
+        <Row label="Network throttling">
+          <div className="flex flex-col items-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2">
+              {THROTTLE_PROFILE_PRESETS.map((profile) => (
+                <OptionButton
+                  key={profile.id}
+                  label={profile.label}
+                  active={throttleSettings.profileId === profile.id}
+                  onClick={() => void applyThrottleSettings(profile.id)}
+                />
+              ))}
+              <OptionButton
+                label="Custom"
+                active={throttleSettings.profileId === 'custom'}
+                onClick={() => void applyThrottleSettings('custom')}
+              />
+            </div>
+            <span className="text-xs text-pb-text-dim max-w-md text-right">
+              {resolvedThrottleProfile.description}
+            </span>
+          </div>
+        </Row>
+        <Row label="Custom throttle">
+          <div className="flex flex-col items-end gap-2">
+            <div className="grid grid-cols-3 gap-2">
+              <NumberField
+                label="Download kbps"
+                value={throttleDraft.downloadKbps}
+                onChange={(value) => setThrottleDraft((current) => normalizeCustomThrottleProfile({
+                  ...current,
+                  downloadKbps: value,
+                }))}
+              />
+              <NumberField
+                label="Upload kbps"
+                value={throttleDraft.uploadKbps}
+                onChange={(value) => setThrottleDraft((current) => normalizeCustomThrottleProfile({
+                  ...current,
+                  uploadKbps: value,
+                }))}
+              />
+              <NumberField
+                label="Latency ms"
+                value={throttleDraft.latencyMs}
+                onChange={(value) => setThrottleDraft((current) => normalizeCustomThrottleProfile({
+                  ...current,
+                  latencyMs: value,
+                }))}
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => void applyThrottleSettings('custom')}
+                className="px-3 py-1.5 rounded text-sm font-medium bg-pb-accent text-pb-bg hover:bg-pb-accent/80"
+              >
+                Apply Custom Profile
+              </button>
+              <span className="text-xs text-pb-text-dim">Applies to all proxied traffic.</span>
+              {throttleError && <span className="text-xs text-pb-error">{throttleError}</span>}
+            </div>
+          </div>
+        </Row>
+        <Row label="Upstream proxy / chaining">
+          <div className="flex flex-col items-end gap-2">
+            <Toggle
+              checked={upstreamProxyDraft.enabled}
+              onChange={() => {
+                setUpstreamProxyDraft((current) => ({ ...current, enabled: !current.enabled }));
+                setUpstreamApplied(false);
+                setUpstreamError(null);
+              }}
+            />
+            <span className="text-xs text-pb-text-dim max-w-md text-right">
+              Route outbound requests through an HTTP or SOCKS5 proxy before they reach the origin server.
+            </span>
+          </div>
+        </Row>
+        <Row label="Proxy type">
+          <div className="flex gap-2">
+            {(['http', 'socks5'] as const).map((type) => (
+              <OptionButton
+                key={type}
+                label={type === 'http' ? 'HTTP' : 'SOCKS5'}
+                active={upstreamProxyDraft.type === type}
+                onClick={() => {
+                  setUpstreamProxyDraft((current) => ({ ...current, type: type as UpstreamProxyType }));
+                  setUpstreamApplied(false);
+                  setUpstreamError(null);
+                }}
+              />
+            ))}
+          </div>
+        </Row>
+        <Row label="Proxy endpoint">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={upstreamProxyDraft.host}
+              onChange={(event) => {
+                setUpstreamProxyDraft((current) => ({ ...current, host: event.target.value }));
+                setUpstreamApplied(false);
+                setUpstreamError(null);
+              }}
+              placeholder="proxy.example.com"
+              className="bg-pb-bg border border-pb-border rounded px-3 py-1.5 text-sm text-pb-text font-mono w-56 focus:outline-none focus:border-pb-accent"
+            />
+            <input
+              type="number"
+              value={upstreamProxyDraft.port}
+              onChange={(event) => {
+                setUpstreamProxyDraft((current) => normalizeUpstreamProxySettings({
+                  ...current,
+                  port: Number(event.target.value),
+                }));
+                setUpstreamApplied(false);
+                setUpstreamError(null);
+              }}
+              className="bg-pb-bg border border-pb-border rounded px-3 py-1.5 text-sm text-pb-text font-mono w-24 focus:outline-none focus:border-pb-accent"
+            />
+          </div>
+        </Row>
+        <Row label="Authentication">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={upstreamProxyDraft.username}
+              onChange={(event) => {
+                setUpstreamProxyDraft((current) => ({ ...current, username: event.target.value }));
+                setUpstreamApplied(false);
+                setUpstreamError(null);
+              }}
+              placeholder="Username (optional)"
+              className="bg-pb-bg border border-pb-border rounded px-3 py-1.5 text-sm text-pb-text w-44 focus:outline-none focus:border-pb-accent"
+            />
+              <input
+                type="password"
+                value={upstreamProxyDraft.password}
+                onChange={(event) => {
+                  setUpstreamProxyDraft((current) => ({
+                    ...current,
+                    password: event.target.value,
+                    passwordChanged: true,
+                  }));
+                  setUpstreamApplied(false);
+                  setUpstreamError(null);
+                }}
+                placeholder={upstreamProxyDraft.hasSavedPassword && !upstreamProxyDraft.passwordChanged
+                  ? 'Saved password'
+                  : 'Password (optional)'}
+                className="bg-pb-bg border border-pb-border rounded px-3 py-1.5 text-sm text-pb-text w-44 focus:outline-none focus:border-pb-accent"
+              />
+            </div>
+        </Row>
+        <Row label="Bypass patterns">
+          <div className="flex flex-col items-end gap-2">
+            <textarea
+              value={upstreamBypassDraft}
+              onChange={(event) => {
+                setUpstreamBypassDraft(event.target.value);
+                setUpstreamApplied(false);
+                setUpstreamError(null);
+              }}
+              rows={3}
+              placeholder="localhost, 127.0.0.1, *.internal.example"
+              className="bg-pb-bg border border-pb-border rounded px-3 py-2 text-sm text-pb-text font-mono w-80 resize-y focus:outline-none focus:border-pb-accent"
+            />
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => void handleApplyUpstreamProxy()}
+                className="px-3 py-1.5 rounded text-sm font-medium bg-pb-accent text-pb-bg hover:bg-pb-accent/80"
+              >
+                Apply Upstream Proxy
+              </button>
+              {upstreamApplied && <span className="text-xs text-pb-success">✓</span>}
+              {upstreamError && <span className="text-xs text-pb-error">{upstreamError}</span>}
+            </div>
+            <span className="text-xs text-pb-text-dim max-w-md text-right">
+              Match hosts or full URLs with glob patterns. Matching requests connect directly instead of using the upstream proxy.
+            </span>
+          </div>
         </Row>
       </Section>
 
@@ -223,6 +550,92 @@ export default function SettingsPanel() {
         </Row>
       </Section>
 
+      <Section title="Updates">
+        <Row label="Automatic update checks">
+          <div className="flex flex-col items-end gap-1">
+            <Toggle checked={updateState.enabled} onChange={handleAutoUpdateToggle} />
+            <span className="text-xs text-pb-text-dim">
+              Checks GitHub Releases on startup and periodically while the app stays open.
+            </span>
+          </div>
+        </Row>
+        <Row label="Update status">
+          <div className="flex flex-col items-end gap-1 text-right">
+            <span className="text-sm text-pb-text">
+              {describeUpdateState(updateState)}
+            </span>
+            <span className="text-xs text-pb-text-dim">
+              Current version {updateState.currentVersion}
+              {updateState.latestVersion ? ` • Latest ${updateState.latestVersion}` : ''}
+            </span>
+            {updateState.error && <span className="text-xs text-pb-error">{updateState.error}</span>}
+          </div>
+        </Row>
+        <Row label="Update actions">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleCheckForUpdates}
+              disabled={!updateState.supported || updateState.checking}
+              className="px-3 py-1.5 rounded text-sm font-medium bg-pb-accent text-pb-bg hover:bg-pb-accent/80 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {updateState.checking ? 'Checking…' : 'Check now'}
+            </button>
+            <button
+              onClick={handleInstallUpdate}
+              disabled={!updateState.updateDownloaded}
+              className="px-3 py-1.5 rounded text-sm text-pb-text border border-pb-border hover:bg-pb-surface-hover disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              Restart to update
+            </button>
+          </div>
+        </Row>
+        {!updateState.supported && (
+          <Row label="">
+            <span className="text-xs text-pb-text-dim">
+              Auto-update is available in packaged Windows builds. Development runs do not contact the update feed.
+            </span>
+          </Row>
+        )}
+      </Section>
+
+      <Section title="Protocol Decoders">
+        <Row label=".proto files">
+          <div className="flex flex-col items-end gap-2">
+            <textarea
+              value={protobufPathsDraft}
+              onChange={(event) => {
+                setProtobufPathsDraft(event.target.value);
+                setProtobufApplied(false);
+                setProtobufError(null);
+              }}
+              rows={4}
+              placeholder="C:\path\to\service.proto"
+              className="bg-pb-bg border border-pb-border rounded px-3 py-2 text-sm text-pb-text font-mono w-80
+                focus:outline-none focus:border-pb-accent resize-y"
+            />
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleBrowseProtoFiles}
+                className="px-3 py-1.5 rounded text-sm text-pb-text border border-pb-border hover:bg-pb-surface-hover"
+              >
+                Browse
+              </button>
+              <button
+                onClick={handleApplyProtoFiles}
+                className="px-3 py-1.5 rounded text-sm font-medium bg-pb-accent text-pb-bg hover:bg-pb-accent/80"
+              >
+                Apply
+              </button>
+              {protobufApplied && <span className="text-xs text-pb-success">✓</span>}
+            </div>
+            <span className="max-w-md text-right text-xs text-pb-text-dim">
+              Used to decode gRPC and protobuf bodies in the traffic detail view. Without a matching schema, ProxyBoy falls back to raw field numbers.
+            </span>
+            {protobufError && <span className="text-xs text-pb-error">{protobufError}</span>}
+          </div>
+        </Row>
+      </Section>
+
       {/* Appearance */}
       <Section title="Appearance">
         <Row label="Theme">
@@ -276,7 +689,7 @@ export default function SettingsPanel() {
           <span className="text-sm text-pb-text">ProxyBoy</span>
         </Row>
         <Row label="Version">
-          <span className="text-sm text-pb-text font-mono">1.0.0</span>
+          <span className="text-sm text-pb-text font-mono">{updateState.currentVersion}</span>
         </Row>
         <Row label="Built with">
           <span className="text-sm text-pb-text">Electron, React, GitHub Copilot SDK</span>
@@ -287,6 +700,25 @@ export default function SettingsPanel() {
       </Section>
     </div>
   );
+}
+
+function describeUpdateState(updateState: ReturnType<typeof useAppStore.getState>['updateState']): string {
+  if (!updateState.supported) {
+    return 'Unavailable in development builds';
+  }
+  if (updateState.updateDownloaded) {
+    return 'Update downloaded and ready to install';
+  }
+  if (updateState.updateAvailable) {
+    return 'Update found and downloading in the background';
+  }
+  if (updateState.checking) {
+    return 'Checking for updates';
+  }
+  if (updateState.lastCheckedAt) {
+    return `Last checked ${new Date(updateState.lastCheckedAt).toLocaleString()}`;
+  }
+  return 'Waiting for the first update check';
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -360,5 +792,29 @@ function OptionButton({
     >
       {label}{disabled ? ' (coming soon)' : ''}
     </button>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-xs text-pb-text-dim">
+      <span>{label}</span>
+      <input
+        type="number"
+        min={0}
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+        className="bg-pb-bg border border-pb-border rounded px-3 py-1.5 text-sm text-pb-text w-28
+          focus:outline-none focus:border-pb-accent"
+      />
+    </label>
   );
 }

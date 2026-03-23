@@ -20,6 +20,19 @@ const config: ForgeConfig = {
     }),
     new MakerZIP({}, ['win32']),
   ],
+  publishers: [
+    {
+      name: '@electron-forge/publisher-github',
+      config: {
+        repository: {
+          owner: 'pjperez',
+          name: 'proxyboy',
+        },
+        prerelease: false,
+        draft: true,
+      },
+    },
+  ],
   plugins: [
     new VitePlugin({
       build: [
