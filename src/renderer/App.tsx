@@ -23,7 +23,7 @@ import { clearTrafficFlows, deleteTrafficFlow, exportHarFile, importHarFile, tog
 import { getNextSelectedFlowIdAfterDelete } from './utils/shortcuts';
 import { applyThemePreference, watchSystemTheme } from './utils/theme';
 import { normalizeThrottleSettings } from '../shared/throttle';
-import type { ComposerRequest, HttpFlow } from '../shared/types';
+import type { BreakpointPauseMessage, BreakpointResumeMessage, ComposerRequest, HttpFlow } from '../shared/types';
 
 declare global {
   interface Window {
@@ -95,7 +95,8 @@ function MainApp() {
     setShowAgent(false);
   }, []);
 
-  const [breakpointPause, setBreakpointPause] = useState<{flowId: string; flow: any; phase: string} | null>(null);
+  const [breakpointQueue, setBreakpointQueue] = useState<BreakpointPauseMessage[]>([]);
+  const breakpointPause = breakpointQueue[0] ?? null;
 
   const flows = useTrafficStore(s => s.flows);
   const filter = useTrafficStore(s => s.filter);
@@ -145,8 +146,8 @@ function MainApp() {
       setAgentDetached(false);
     });
 
-    const unsubBreakpoint = api.breakpoint?.onPaused?.((data: any) => {
-      setBreakpointPause(data);
+    const unsubBreakpoint = api.breakpoint?.onPaused?.((data: BreakpointPauseMessage) => {
+      setBreakpointQueue((current) => [...current, data]);
     });
     const unsubUpdateState = api.app.onUpdateState((state: any) => {
       setUpdateState(state);
@@ -595,12 +596,10 @@ function MainApp() {
       )}
       {breakpointPause && (
         <BreakpointPauseDialog
-          flowId={breakpointPause.flowId}
-          flow={breakpointPause.flow}
-          phase={breakpointPause.phase as 'request' | 'response'}
-          onResume={(flowId, action) => {
-            window.proxyboy?.breakpoint.resume(flowId, action);
-            setBreakpointPause(null);
+          pause={breakpointPause}
+          onResume={(data: BreakpointResumeMessage) => {
+            window.proxyboy?.breakpoint.resume(data);
+            setBreakpointQueue((current) => current.slice(1));
           }}
         />
       )}

@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../shared/constants';
-import type { ProxyState, HttpFlow, Rule, FilterCriteria, CaptureFilterMode, ComposerRequest, AppUpdateState, ScriptRule, ScriptTestResult, TrafficFlowUpdate } from '../shared/types';
+import type { BreakpointPauseMessage, BreakpointResumeMessage, ProxyState, HttpFlow, Rule, FilterCriteria, CaptureFilterMode, ComposerRequest, AppUpdateState, ScriptRule, ScriptTestResult, TrafficFlowUpdate } from '../shared/types';
 import type { ThrottleSettings } from '../shared/throttle';
 import type { UpstreamProxySettings } from '../shared/upstream-proxy';
 import type { ProtobufDecodeRequest, ProtobufSettings } from '../shared/protobuf';
@@ -73,13 +73,13 @@ const api = {
 
   // Breakpoint
   breakpoint: {
-    onPaused: (callback: (data: { flowId: string; flow: HttpFlow; phase: string }) => void) => {
-      const handler = (_event: any, data: any) => callback(data);
+    onPaused: (callback: (data: BreakpointPauseMessage) => void) => {
+      const handler = (_event: any, data: BreakpointPauseMessage) => callback(data);
       ipcRenderer.on(IPC_CHANNELS.BREAKPOINT_PAUSED, handler);
       return () => ipcRenderer.removeListener(IPC_CHANNELS.BREAKPOINT_PAUSED, handler);
     },
-    resume: (flowId: string, action: 'forward' | 'drop') =>
-      ipcRenderer.invoke(IPC_CHANNELS.BREAKPOINT_RESUME, { flowId, action }),
+    resume: (data: BreakpointResumeMessage) =>
+      ipcRenderer.invoke(IPC_CHANNELS.BREAKPOINT_RESUME, data),
   },
 
   // Agent

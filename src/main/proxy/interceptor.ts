@@ -1,4 +1,4 @@
-import { HttpFlow, BreakpointRule, MapLocalRule, MapRemoteRule, Rule, AllowListRule, BlockListRule, CaptureFilterMode, ScriptRule } from '../../shared/types';
+import { BreakpointResumeMessage, HttpFlow, BreakpointRule, MapLocalRule, MapRemoteRule, Rule, AllowListRule, BlockListRule, CaptureFilterMode, ScriptRule } from '../../shared/types';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -14,7 +14,7 @@ export class Interceptor {
   private captureMode: CaptureFilterMode = 'capture-all';
   private regexCache: Map<string, RegExp> = new Map();
   private pausedFlows: Map<string, {
-    resolve: (action: 'forward' | 'drop') => void;
+    resolve: (data: BreakpointResumeMessage) => void;
     flow: HttpFlow;
   }> = new Map();
 
@@ -216,23 +216,23 @@ export class Interceptor {
     }
   }
 
-  pauseFlow(flowId: string, flow: HttpFlow): Promise<'forward' | 'drop'> {
+  pauseFlow(flowId: string, flow: HttpFlow): Promise<BreakpointResumeMessage> {
     return new Promise((resolve) => {
       this.pausedFlows.set(flowId, { resolve, flow });
     });
   }
 
-  resumeFlow(flowId: string, action: 'forward' | 'drop'): void {
+  resumeFlow(flowId: string, data: BreakpointResumeMessage): void {
     const paused = this.pausedFlows.get(flowId);
     if (paused) {
-      paused.resolve(action);
+      paused.resolve(data);
       this.pausedFlows.delete(flowId);
     }
   }
 
   clearPausedFlows(): void {
-    for (const [, paused] of this.pausedFlows) {
-      paused.resolve('forward');
+    for (const [flowId, paused] of this.pausedFlows) {
+      paused.resolve({ flowId, action: 'forward' });
     }
     this.pausedFlows.clear();
   }

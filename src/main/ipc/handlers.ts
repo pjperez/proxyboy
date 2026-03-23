@@ -1,12 +1,12 @@
 import { ipcMain, BrowserWindow, dialog, app, safeStorage } from 'electron';
 import * as path from 'path';
 import { IPC_CHANNELS } from '../../shared/constants';
-import { ProxyEngine } from '../proxy/engine';
+import { ProxyEngine, encodeBreakpointBody } from '../proxy/engine';
 import { CertificateManager } from '../proxy/certificate';
 import { AgentClient } from '../agent/client';
 import { replayFlowThroughProxy, sendComposedRequestThroughProxy } from '../proxy/replay';
 import { setSystemProxy, clearSystemProxy, isSystemProxyEnabled } from '../utils/windows-proxy';
-import { ProxyState, Rule, HttpFlow, CaptureFilterMode, ComposerRequest, ScriptRule, ScriptTestResult, TrafficFlowUpdate } from '../../shared/types';
+import { BreakpointPauseMessage, BreakpointResumeMessage, ProxyState, Rule, HttpFlow, CaptureFilterMode, ComposerRequest, ScriptRule, ScriptTestResult, TrafficFlowUpdate } from '../../shared/types';
 import { normalizeThrottleSettings, type ThrottleSettings } from '../../shared/throttle';
 import { normalizeUpstreamProxySettings, type UpstreamProxySettings } from '../../shared/upstream-proxy';
 import { UpdateManager } from '../updater';
@@ -677,9 +677,9 @@ export function registerIpcHandlers(
   });
 
   // Breakpoint
-  ipcMain.handle(IPC_CHANNELS.BREAKPOINT_RESUME, (_event, data: any) => {
+  ipcMain.handle(IPC_CHANNELS.BREAKPOINT_RESUME, (_event, data: BreakpointResumeMessage) => {
     try {
-      proxyEngine.getInterceptor().resumeFlow(data.flowId, data.action);
+      proxyEngine.getInterceptor().resumeFlow(data.flowId, data);
       return { success: true };
     } catch (error: any) {
       return { success: false, error: error.message };
@@ -1033,9 +1033,9 @@ export function registerIpcHandlers(
   });
 
   // Forward breakpoint events to renderer
-  proxyEngine.on('breakpoint:paused', (data: any) => {
+  proxyEngine.on('breakpoint:paused', (data: { flowId: string; flow: HttpFlow; phase: 'request' | 'response' }) => {
     if (!mainWindow.isDestroyed()) {
-      mainWindow.webContents.send(IPC_CHANNELS.BREAKPOINT_PAUSED, data);
+      mainWindow.webContents.send(IPC_CHANNELS.BREAKPOINT_PAUSED, sanitizeBreakpointPause(data));
     }
   });
 
@@ -1046,6 +1046,27 @@ export function registerIpcHandlers(
     }
     updateManager.dispose();
   });
+}
+
+function sanitizeBreakpointPause(
+  data: { flowId: string; flow: HttpFlow; phase: 'request' | 'response' },
+): BreakpointPauseMessage {
+  return {
+    ...data,
+    flow: {
+      ...data.flow,
+      request: {
+        ...data.flow.request,
+        body: encodeBreakpointBody(data.flow.request.body),
+      },
+      response: data.flow.response
+        ? {
+            ...data.flow.response,
+            body: encodeBreakpointBody(data.flow.response.body),
+          }
+        : undefined,
+    },
+  };
 }
 
 function sanitizeFlow(flow: HttpFlow): any {
