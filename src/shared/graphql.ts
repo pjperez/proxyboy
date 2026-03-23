@@ -88,6 +88,12 @@ export function annotateGraphQLRequest(
 ): void {
   request.graphqlOperationName = undefined;
   request.graphqlOperationType = undefined;
+  if (tags) {
+    const graphqlTagIndex = tags.indexOf('graphql');
+    if (graphqlTagIndex !== -1) {
+      tags.splice(graphqlTagIndex, 1);
+    }
+  }
 
   if (request.method.toUpperCase() !== 'POST') {
     return;

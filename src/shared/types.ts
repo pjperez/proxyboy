@@ -258,15 +258,42 @@ export interface TrafficUpdateMessage {
   flow: HttpFlow;
 }
 
+export interface BreakpointPauseRequest extends Omit<HttpRequest, 'body'> {
+  body?: StoredBody;
+}
+
+export interface BreakpointPauseResponse extends Omit<HttpResponse, 'body'> {
+  body?: StoredBody;
+}
+
+export interface BreakpointPauseFlow extends Omit<HttpFlow, 'request' | 'response'> {
+  request: BreakpointPauseRequest;
+  response?: BreakpointPauseResponse;
+}
+
 export interface BreakpointPauseMessage {
   flowId: string;
-  flow: HttpFlow;
+  flow: BreakpointPauseFlow;
   phase: 'request' | 'response';
+}
+
+export interface BreakpointRequestEdits {
+  headers: HttpHeaders;
+  body?: StoredBody;
+}
+
+export interface BreakpointResponseEdits {
+  statusCode: number;
+  statusMessage: string;
+  headers: HttpHeaders;
+  body?: StoredBody;
 }
 
 export interface BreakpointResumeMessage {
   flowId: string;
   action: 'forward' | 'drop';
+  request?: BreakpointRequestEdits;
+  response?: BreakpointResponseEdits;
 }
 
 export interface ComposerRequest {
