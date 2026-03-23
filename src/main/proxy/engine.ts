@@ -905,6 +905,7 @@ export class ProxyEngine extends EventEmitter {
           );
           delete (ctx.serverToProxyResponse.headers as Record<string, string | string[]>)['content-length'];
           delete (ctx.serverToProxyResponse.headers as Record<string, string | string[]>)['transfer-encoding'];
+          delete (ctx.serverToProxyResponse.headers as Record<string, string | string[]>)['content-encoding'];
         }
         // Response-phase breakpoint
         const responseBreakRule = this.interceptor.shouldBreakpoint(flow, 'response');
