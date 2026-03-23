@@ -31,8 +31,16 @@ import {
   deleteFlow as deleteStoredFlow,
   getAppSetting,
   setAppSetting,
+  getSessions,
+  createSession,
+  renameSession as dbRenameSession,
+  deleteSession as dbDeleteSession,
+  getActiveSessionId,
+  setActiveSessionId,
+  getFlowById,
 } from '../storage/queries';
 import * as fs from 'fs';
+import type { Session } from '../../shared/types';
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
 declare const MAIN_WINDOW_VITE_NAME: string;
@@ -136,6 +144,14 @@ export function registerIpcHandlers(
   const updateManager = new UpdateManager('pjperez/proxyboy', getAppSetting(AUTO_UPDATE_ENABLED_KEY) !== 'false');
   let protobufSettings: ProtobufSettings = DEFAULT_PROTOBUF_SETTINGS;
   let pendingFlowUpdates = new Map<string, TrafficFlowUpdate>();
+
+  // Ensure default session exists
+  const existingSessions = getSessions();
+  if (!existingSessions.some(s => s.id === 'default')) {
+    const now = Date.now();
+    createSession({ id: 'default', name: 'Default', createdAt: now, updatedAt: now });
+  }
+  let activeSessionId = getActiveSessionId() || 'default';
   let flowUpdateTimer: NodeJS.Timeout | null = null;
 
   // Broadcast to all windows that care about agent events
@@ -367,7 +383,8 @@ export function registerIpcHandlers(
   // Traffic
   ipcMain.handle(IPC_CHANNELS.TRAFFIC_GET_FLOWS, (_event) => {
     try {
-      return proxyEngine.getFlows().map(sanitizeFlow);
+      const dbFlows = getStoredFlows(5000, 0, activeSessionId);
+      return dbFlows.map(sanitizeFlow);
     } catch (error: any) {
       return { success: false, error: error.message };
     }
@@ -376,7 +393,10 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.TRAFFIC_GET_FLOW, (_event, id: string) => {
     try {
       const flow = proxyEngine.getFlow(id);
-      return flow ? sanitizeFlow(flow) : null;
+      if (flow) return sanitizeFlow(flow);
+      // Fallback to DB for flows cleared from engine memory
+      const dbFlow = getFlowById(id);
+      return dbFlow ? sanitizeFlow(dbFlow) : null;
     } catch (error: any) {
       return { success: false, error: error.message };
     }
@@ -385,7 +405,7 @@ export function registerIpcHandlers(
   ipcMain.handle(IPC_CHANNELS.TRAFFIC_CLEAR, () => {
     try {
       proxyEngine.clearFlows();
-      clearAllFlows();
+      clearAllFlows(activeSessionId);
       return { success: true };
     } catch (error: any) {
       return { success: false, error: error.message };
@@ -1017,6 +1037,45 @@ export function registerIpcHandlers(
     }
   });
 
+  // Sessions
+  ipcMain.handle(IPC_CHANNELS.SESSION_LIST, () => {
+    return getSessions();
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SESSION_CREATE, (_event, name: string) => {
+    const now = Date.now();
+    const session: Session = {
+      id: randomUUID(),
+      name: name || 'New Tab',
+      createdAt: now,
+      updatedAt: now,
+    };
+    createSession(session);
+    return session;
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SESSION_RENAME, (_event, { id, name }: { id: string; name: string }) => {
+    dbRenameSession(id, name);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SESSION_DELETE, (_event, id: string) => {
+    if (id === 'default') return;
+    dbDeleteSession(id);
+    if (activeSessionId === id) {
+      activeSessionId = 'default';
+      setActiveSessionId('default');
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SESSION_SET_ACTIVE, (_event, id: string) => {
+    activeSessionId = id;
+    setActiveSessionId(id);
+  });
+
+  ipcMain.handle(IPC_CHANNELS.SESSION_GET_ACTIVE, () => {
+    return activeSessionId;
+  });
+
   // Forward proxy events to renderer
   proxyEngine.on('flow:start', (flow: HttpFlow) => {
     mainWindow.webContents.send(IPC_CHANNELS.TRAFFIC_NEW_FLOW, sanitizeFlow(flow));
@@ -1029,7 +1088,7 @@ export function registerIpcHandlers(
   proxyEngine.on('flow:complete', (flow: HttpFlow) => {
     pendingFlowUpdates.delete(flow.id);
     mainWindow.webContents.send(IPC_CHANNELS.TRAFFIC_FLOW_COMPLETE, sanitizeFlow(flow));
-    saveFlow(flow);
+    saveFlow(flow, activeSessionId);
   });
 
   // Forward breakpoint events to renderer

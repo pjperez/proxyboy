@@ -1,5 +1,5 @@
 import { getDatabase, schedulePersist } from './database';
-import { FlowTiming, HttpFlow, HttpRequest, HttpResponse, Rule, StoredBody } from '../../shared/types';
+import { FlowTiming, HttpFlow, HttpRequest, HttpResponse, Rule, Session, StoredBody } from '../../shared/types';
 import { annotateGraphQLRequest } from '../../shared/graphql';
 
 function isProbablyTextBuffer(buf: Buffer): boolean {
@@ -31,14 +31,14 @@ function decodeBody(data?: string, encoding?: string): Buffer | string | undefin
   return data;
 }
 
-export function saveFlow(flow: HttpFlow): void {
+export function saveFlow(flow: HttpFlow, sessionId?: string): void {
   const db = getDatabase();
   const requestBody = encodeBody(flow.request.body);
   const responseBody = encodeBody(flow.response?.body);
 
   db.run(
-    `INSERT OR REPLACE INTO flows (id, state, tags, notes, created_at, timing) VALUES (?, ?, ?, ?, ?, ?)`,
-    [flow.id, flow.state, JSON.stringify(flow.tags), flow.notes || null, flow.createdAt, flow.timing ? JSON.stringify(flow.timing) : null],
+    `INSERT OR REPLACE INTO flows (id, state, tags, notes, created_at, timing, session_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [flow.id, flow.state, JSON.stringify(flow.tags), flow.notes || null, flow.createdAt, flow.timing ? JSON.stringify(flow.timing) : null, sessionId || null],
   );
 
   db.run(
@@ -92,7 +92,11 @@ function queryFlows(sql: string, params: any[] = []): HttpFlow[] {
   return flows;
 }
 
-export function getFlows(limit = 1000, offset = 0): HttpFlow[] {
+export function getFlows(limit = 1000, offset = 0, sessionId?: string): HttpFlow[] {
+  const sessionFilter = sessionId ? 'AND f.session_id = ?' : '';
+  const params = sessionId ? [limit, offset, sessionId] : [limit, offset];
+  // Place sessionId params before limit/offset in the WHERE clause
+  const reorderedParams = sessionId ? [sessionId, limit, offset] : [limit, offset];
   return queryFlows(`
     SELECT f.id, f.state, f.tags, f.notes, f.created_at, f.timing,
            r.id as req_id, r.method, r.url, r.protocol, r.host, r.path,
@@ -105,9 +109,28 @@ export function getFlows(limit = 1000, offset = 0): HttpFlow[] {
     FROM flows f
     JOIN requests r ON r.flow_id = f.id
     LEFT JOIN responses res ON res.flow_id = f.id
+    WHERE 1=1 ${sessionFilter}
     ORDER BY f.created_at DESC
     LIMIT ? OFFSET ?
-  `, [limit, offset]);
+  `, reorderedParams);
+}
+
+export function getFlowById(id: string): HttpFlow | null {
+  const results = queryFlows(`
+    SELECT f.id, f.state, f.tags, f.notes, f.created_at, f.timing,
+           r.id as req_id, r.method, r.url, r.protocol, r.host, r.path,
+           r.headers as req_headers, r.body as req_body, r.body_encoding as req_body_encoding, r.body_size as req_body_size,
+           r.graphql_operation_type as req_graphql_operation_type, r.graphql_operation_name as req_graphql_operation_name,
+           r.timestamp as req_timestamp,
+           res.id as res_id, res.status_code, res.status_message,
+           res.headers as res_headers, res.body as res_body, res.body_encoding as res_body_encoding, res.body_size as res_body_size,
+           res.timestamp as res_timestamp, res.duration
+    FROM flows f
+    JOIN requests r ON r.flow_id = f.id
+    LEFT JOIN responses res ON res.flow_id = f.id
+    WHERE f.id = ?
+  `, [id]);
+  return results.length > 0 ? results[0] : null;
 }
 
 export function searchFlows(query: string): HttpFlow[] {
@@ -152,11 +175,17 @@ export function getErrorFlows(): HttpFlow[] {
   `);
 }
 
-export function clearAllFlows(): void {
+export function clearAllFlows(sessionId?: string): void {
   const db = getDatabase();
-  db.run('DELETE FROM responses');
-  db.run('DELETE FROM requests');
-  db.run('DELETE FROM flows');
+  if (sessionId) {
+    db.run('DELETE FROM responses WHERE flow_id IN (SELECT id FROM flows WHERE session_id = ?)', [sessionId]);
+    db.run('DELETE FROM requests WHERE flow_id IN (SELECT id FROM flows WHERE session_id = ?)', [sessionId]);
+    db.run('DELETE FROM flows WHERE session_id = ?', [sessionId]);
+  } else {
+    db.run('DELETE FROM responses');
+    db.run('DELETE FROM requests');
+    db.run('DELETE FROM flows');
+  }
   schedulePersist();
 }
 
@@ -274,4 +303,55 @@ function rowToFlow(row: any): HttpFlow {
     createdAt: row.created_at,
     timing: row.timing ? JSON.parse(row.timing as string) as FlowTiming : undefined,
   };
+}
+
+// Session CRUD
+export function getSessions(): Session[] {
+  const db = getDatabase();
+  const stmt = db.prepare('SELECT id, name, created_at, updated_at FROM sessions ORDER BY created_at ASC');
+  const sessions: Session[] = [];
+  while (stmt.step()) {
+    const row = stmt.getAsObject();
+    sessions.push({
+      id: row.id as string,
+      name: row.name as string,
+      createdAt: row.created_at as number,
+      updatedAt: row.updated_at as number,
+    });
+  }
+  stmt.free();
+  return sessions;
+}
+
+export function createSession(session: Session): void {
+  const db = getDatabase();
+  db.run(
+    'INSERT INTO sessions (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)',
+    [session.id, session.name, session.createdAt, session.updatedAt],
+  );
+  schedulePersist();
+}
+
+export function renameSession(id: string, name: string): void {
+  const db = getDatabase();
+  db.run(
+    'UPDATE sessions SET name = ?, updated_at = ? WHERE id = ?',
+    [name, Date.now(), id],
+  );
+  schedulePersist();
+}
+
+export function deleteSession(id: string): void {
+  const db = getDatabase();
+  clearAllFlows(id);
+  db.run('DELETE FROM sessions WHERE id = ?', [id]);
+  schedulePersist();
+}
+
+export function getActiveSessionId(): string | null {
+  return getAppSetting('active_session_id');
+}
+
+export function setActiveSessionId(id: string): void {
+  setAppSetting('active_session_id', id);
 }

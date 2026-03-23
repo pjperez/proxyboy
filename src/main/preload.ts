@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_CHANNELS } from '../shared/constants';
-import type { BreakpointPauseMessage, BreakpointResumeMessage, ProxyState, HttpFlow, Rule, FilterCriteria, CaptureFilterMode, ComposerRequest, AppUpdateState, ScriptRule, ScriptTestResult, TrafficFlowUpdate } from '../shared/types';
+import type { BreakpointPauseMessage, BreakpointResumeMessage, ProxyState, HttpFlow, Rule, FilterCriteria, CaptureFilterMode, ComposerRequest, AppUpdateState, ScriptRule, ScriptTestResult, TrafficFlowUpdate, Session } from '../shared/types';
 import type { ThrottleSettings } from '../shared/throttle';
 import type { UpstreamProxySettings } from '../shared/upstream-proxy';
 import type { ProtobufDecodeRequest, ProtobufSettings } from '../shared/protobuf';
@@ -154,6 +154,16 @@ const api = {
     getConfig: () => ipcRenderer.invoke(IPC_CHANNELS.DNS_GET_CONFIG),
     setServers: (servers: string[]) => ipcRenderer.invoke(IPC_CHANNELS.DNS_SET_SERVERS, servers),
     clearCache: () => ipcRenderer.invoke(IPC_CHANNELS.DNS_CLEAR_CACHE),
+  },
+
+  // Sessions
+  sessions: {
+    list: (): Promise<Session[]> => ipcRenderer.invoke(IPC_CHANNELS.SESSION_LIST),
+    create: (name: string): Promise<Session> => ipcRenderer.invoke(IPC_CHANNELS.SESSION_CREATE, name),
+    rename: (id: string, name: string): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.SESSION_RENAME, { id, name }),
+    delete: (id: string): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.SESSION_DELETE, id),
+    setActive: (id: string): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS.SESSION_SET_ACTIVE, id),
+    getActive: (): Promise<string> => ipcRenderer.invoke(IPC_CHANNELS.SESSION_GET_ACTIVE),
   },
 };
 
