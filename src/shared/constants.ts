@@ -7,6 +7,7 @@ export const IPC_CHANNELS = {
   PROXY_SET_SYSTEM: 'proxy:set-system-proxy',
   PROXY_SET_NO_CACHE: 'proxy:set-no-cache',
   PROXY_SET_THROTTLE: 'proxy:set-throttle',
+  PROXY_SET_UPSTREAM: 'proxy:set-upstream',
   PROXY_INSTALL_CERT: 'proxy:install-cert',
   PROXY_CERT_STATUS: 'proxy:cert-status',
   
@@ -19,6 +20,7 @@ export const IPC_CHANNELS = {
   TRAFFIC_GET_FLOW: 'traffic:get-flow',
   TRAFFIC_DELETE: 'traffic:delete',
   TRAFFIC_REPEAT: 'traffic:repeat',
+  TRAFFIC_COMPOSE: 'traffic:compose',
   
   // Rules
   RULES_GET_ALL: 'rules:get-all',
@@ -29,6 +31,7 @@ export const IPC_CHANNELS = {
   RULES_CREATED: 'rules:created',
   RULES_GET_CAPTURE_MODE: 'rules:get-capture-mode',
   RULES_SET_CAPTURE_MODE: 'rules:set-capture-mode',
+  SCRIPT_TEST: 'script:test',
   
   // Breakpoint
   BREAKPOINT_PAUSED: 'breakpoint:paused',
@@ -49,10 +52,21 @@ export const IPC_CHANNELS = {
   
   // App
   APP_GET_VERSION: 'app:get-version',
+  APP_GET_UPDATE_STATE: 'app:get-update-state',
+  APP_CHECK_FOR_UPDATES: 'app:check-for-updates',
+  APP_SET_AUTO_UPDATE_ENABLED: 'app:set-auto-update-enabled',
+  APP_INSTALL_UPDATE: 'app:install-update',
+  APP_UPDATE_STATE: 'app:update-state',
   APP_EXPORT_HAR: 'app:export-har',
   APP_IMPORT_HAR: 'app:import-har',
   APP_PICK_FILE: 'app:pick-file',
 
+  // Protobuf
+  PROTOBUF_GET_CONFIG: 'protobuf:get-config',
+  PROTOBUF_SET_CONFIG: 'protobuf:set-config',
+  PROTOBUF_PICK_PROTO_FILES: 'protobuf:pick-proto-files',
+  PROTOBUF_DECODE_BODY: 'protobuf:decode-body',
+ 
   // DNS
   DNS_GET_CONFIG: 'dns:get-config',
   DNS_SET_SERVERS: 'dns:set-servers',
@@ -64,3 +78,5 @@ export const DEFAULT_PROXY_HOST = '127.0.0.1';
 export const APP_NAME = 'ProxyBoy';
 export const APP_VERSION = '1.0.0';
 export const INTERNAL_REPLAY_HEADER = 'x-proxyboy-replay';
+export const INTERNAL_COMPOSER_HEADER = 'x-proxyboy-composer-id';
+export const MAX_STREAM_ITEMS = 500;

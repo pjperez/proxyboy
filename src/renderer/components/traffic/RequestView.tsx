@@ -53,7 +53,10 @@ export default function RequestView({ request }: Props) {
           <BodyViewer
             body={String(request.body)}
             contentType={String(request.headers['content-type'] || '')}
+            isBase64={(request as any)._isBase64}
             detectGraphQL={true}
+            requestPath={request.path}
+            direction="request"
           />
         </section>
       )}

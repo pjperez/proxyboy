@@ -3,6 +3,8 @@ import type { TrafficRowColorMode } from '../utils/traffic-row-colors';
 import { loadThemePreference, persistThemePreference, type ThemePreference } from '../utils/theme';
 import type { ThrottleSettings } from '../../shared/throttle';
 import { DEFAULT_THROTTLE_SETTINGS, normalizeThrottleSettings } from '../../shared/throttle';
+import type { AppUpdateState } from '../../shared/types';
+import { APP_VERSION } from '../../shared/constants';
 
 const TRAFFIC_ROW_COLOR_MODE_STORAGE_KEY = 'proxyboy-traffic-row-colors';
 
@@ -42,12 +44,14 @@ interface AppState {
   theme: ThemePreference;
   trafficRowColorMode: TrafficRowColorMode;
   throttleSettings: ThrottleSettings;
+  updateState: AppUpdateState;
   setProxyRunning: (running: boolean) => void;
   setProxyPort: (port: number) => void;
   setNoCacheEnabled: (enabled: boolean) => void;
   setTheme: (theme: ThemePreference) => void;
   setTrafficRowColorMode: (mode: TrafficRowColorMode) => void;
   setThrottleSettings: (settings: ThrottleSettings) => void;
+  setUpdateState: (state: AppUpdateState) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -57,6 +61,14 @@ export const useAppStore = create<AppState>((set) => ({
   theme: loadThemePreference(),
   trafficRowColorMode: loadTrafficRowColorMode(),
   throttleSettings: DEFAULT_THROTTLE_SETTINGS,
+  updateState: {
+    supported: false,
+    enabled: true,
+    checking: false,
+    updateAvailable: false,
+    updateDownloaded: false,
+    currentVersion: APP_VERSION,
+  },
   setProxyRunning: (running) => set({ proxyRunning: running }),
   setProxyPort: (port) => set({ proxyPort: port }),
   setNoCacheEnabled: (enabled) => set({ noCacheEnabled: enabled }),
@@ -69,4 +81,5 @@ export const useAppStore = create<AppState>((set) => ({
     set({ trafficRowColorMode });
   },
   setThrottleSettings: (throttleSettings) => set({ throttleSettings: normalizeThrottleSettings(throttleSettings) }),
+  setUpdateState: (updateState) => set({ updateState }),
 }));

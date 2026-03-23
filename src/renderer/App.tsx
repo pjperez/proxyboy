@@ -7,8 +7,11 @@ import TrafficList from './components/traffic/TrafficList';
 import TrafficDetail from './components/traffic/TrafficDetail';
 import FilterBar from './components/filters/FilterBar';
 import AgentPanel from './components/agent/AgentPanel';
+import ComposerPanel from './components/composer/ComposerPanel';
 import BreakpointEditor from './components/rules/BreakpointEditor';
 import MapLocalEditor from './components/rules/MapLocalEditor';
+import MapRemoteEditor from './components/rules/MapRemoteEditor';
+import ScriptEditor from './components/rules/ScriptEditor';
 import CaptureFilterEditor from './components/rules/CaptureFilterEditor';
 import SettingsPanel from './components/settings/SettingsPanel';
 import BreakpointPauseDialog from './components/rules/BreakpointPauseDialog';
@@ -20,6 +23,7 @@ import { clearTrafficFlows, deleteTrafficFlow, exportHarFile, importHarFile, tog
 import { getNextSelectedFlowIdAfterDelete } from './utils/shortcuts';
 import { applyThemePreference, watchSystemTheme } from './utils/theme';
 import { normalizeThrottleSettings } from '../shared/throttle';
+import type { ComposerRequest, HttpFlow } from '../shared/types';
 
 declare global {
   interface Window {
@@ -27,7 +31,24 @@ declare global {
   }
 }
 
-type View = 'traffic' | 'breakpoints' | 'map-local' | 'capture-rules' | 'settings';
+type View = 'traffic' | 'composer' | 'breakpoints' | 'map-local' | 'map-remote' | 'scripts' | 'capture-rules' | 'settings';
+
+function buildComposerDraftFromFlow(flow: HttpFlow): ComposerRequest {
+  const body = (flow.request as any)._isBase64
+    ? ''
+    : typeof flow.request.body === 'string'
+      ? flow.request.body
+      : flow.request.body
+        ? String(flow.request.body)
+        : undefined;
+
+  return {
+    method: flow.request.method,
+    url: flow.request.url,
+    headers: flow.request.headers,
+      body,
+  };
+}
 
 // Detect if this is the detached agent window
 const isAgentWindow = new URLSearchParams(window.location.search).get('view') === 'agent';
@@ -45,6 +66,7 @@ export default function App() {
 
 function MainApp() {
   const [selectedView, setSelectedView] = useState<View>('traffic');
+  const [composerDraft, setComposerDraft] = useState<ComposerRequest | null>(null);
   const [showAgent, setShowAgent] = useState(false);
   const [agentDetached, setAgentDetached] = useState(false);
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
@@ -88,7 +110,7 @@ function MainApp() {
   const clearComparison = useTrafficStore(s => s.clearComparison);
   const getFilteredFlows = useTrafficStore(s => s.getFilteredFlows);
   const { addRule } = useRulesStore();
-  const { proxyRunning, setProxyRunning, setNoCacheEnabled, setThrottleSettings, theme } = useAppStore();
+  const { proxyRunning, setProxyRunning, setNoCacheEnabled, setThrottleSettings, setUpdateState, theme } = useAppStore();
 
   useEffect(() => {
     const syncTheme = () => {
@@ -110,6 +132,9 @@ function MainApp() {
     const unsubNew = api.traffic.onNewFlow((flow: any) => {
       addFlow(flow);
     });
+    const unsubUpdated = api.traffic.onFlowUpdated((flow: any) => {
+      updateFlow(flow);
+    });
     const unsubComplete = api.traffic.onFlowComplete((flow: any) => {
       updateFlow(flow);
     });
@@ -123,10 +148,19 @@ function MainApp() {
     const unsubBreakpoint = api.breakpoint?.onPaused?.((data: any) => {
       setBreakpointPause(data);
     });
+    const unsubUpdateState = api.app.onUpdateState((state: any) => {
+      setUpdateState(state);
+    });
 
     api.traffic.getFlows().then((loadedFlows: any[]) => {
       if (Array.isArray(loadedFlows)) {
         setFlows(loadedFlows);
+      }
+    }).catch(() => {});
+
+    api.app.getUpdateState().then((state: any) => {
+      if (state?.currentVersion) {
+        setUpdateState(state);
       }
     }).catch(() => {});
 
@@ -150,9 +184,11 @@ function MainApp() {
 
     return () => {
       unsubNew();
+      unsubUpdated();
       unsubComplete();
       unsubRuleCreated?.();
       unsubBreakpoint?.();
+      unsubUpdateState?.();
       unsubAgentClosed();
     };
   }, []);
@@ -307,6 +343,11 @@ function MainApp() {
     setSelectedFlowId(flow.id);
     setCompareTargetFlowId(flow.id);
   }, [markedFlowId, setCompareTargetFlowId, showActionError]);
+
+  const handleEditAndResend = useCallback((flow: HttpFlow) => {
+    setComposerDraft(buildComposerDraftFromFlow(flow));
+    setSelectedView('composer');
+  }, []);
 
   const dismissPanels = useCallback((): boolean => {
     if (showShortcutHelp) {
@@ -500,6 +541,7 @@ function MainApp() {
                     flows={filteredFlows}
                     selectedId={selectedFlowId}
                     onSelect={setSelectedFlowId}
+                    onEditAndResend={handleEditAndResend}
                     markedFlowId={markedFlowId}
                     compareTargetFlowId={compareTargetFlowId}
                     onMarkForCompare={handleMarkFlowForCompare}
@@ -510,6 +552,7 @@ function MainApp() {
                 {selectedFlow && (
                   <div className="w-1/2 overflow-hidden">
                     <TrafficDetail
+                      key={selectedFlow.id}
                       flow={selectedFlow}
                       comparisonFlow={comparisonFlow}
                       onClearComparison={clearComparison}
@@ -520,8 +563,13 @@ function MainApp() {
               </div>
             </>
           )}
+          {selectedView === 'composer' && <ComposerPanel draft={composerDraft} />}
           {selectedView === 'breakpoints' && <BreakpointEditor />}
           {selectedView === 'map-local' && <MapLocalEditor />}
+          {selectedView === 'map-remote' && <MapRemoteEditor />}
+          {selectedView === 'scripts' && <ScriptEditor selectedFlowId={selectedFlowId} />}
+          {selectedView === 'map-remote' && <MapRemoteEditor />}
+          {selectedView === 'scripts' && <ScriptEditor selectedFlowId={selectedFlowId} />}
           {selectedView === 'capture-rules' && <CaptureFilterEditor />}
           {selectedView === 'settings' && <SettingsPanel />}
         </div>

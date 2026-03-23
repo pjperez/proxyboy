@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Rule, BreakpointRule, MapLocalRule, AllowListRule, BlockListRule, CaptureFilterMode } from '../../shared/types';
+import type { Rule, BreakpointRule, MapLocalRule, MapRemoteRule, AllowListRule, BlockListRule, CaptureFilterMode, ScriptRule } from '../../shared/types';
 
 interface RulesState {
   rules: Rule[];
@@ -12,8 +12,10 @@ interface RulesState {
   toggleRule: (id: string) => void;
   getBreakpointRules: () => BreakpointRule[];
   getMapLocalRules: () => MapLocalRule[];
+  getMapRemoteRules: () => MapRemoteRule[];
   getAllowListRules: () => AllowListRule[];
   getBlockListRules: () => BlockListRule[];
+  getScriptRules: () => ScriptRule[];
   loadRules: () => Promise<void>;
   loadCaptureMode: () => Promise<void>;
   setCaptureMode: (mode: CaptureFilterMode) => Promise<{ success: boolean; mode: CaptureFilterMode; error?: string }>;
@@ -51,11 +53,17 @@ export const useRulesStore = create<RulesState>((set, get) => ({
   getMapLocalRules: () =>
     get().rules.filter((r): r is MapLocalRule => r.type === 'map-local'),
 
+  getMapRemoteRules: () =>
+    get().rules.filter((r): r is MapRemoteRule => r.type === 'map-remote'),
+
   getAllowListRules: () =>
     get().rules.filter((r): r is AllowListRule => r.type === 'allow-list'),
 
   getBlockListRules: () =>
     get().rules.filter((r): r is BlockListRule => r.type === 'block-list'),
+
+  getScriptRules: () =>
+    get().rules.filter((r): r is ScriptRule => r.type === 'script'),
 
   loadRules: async () => {
     set({ loading: true });

@@ -26,6 +26,7 @@ interface Props {
   flows: HttpFlow[];
   selectedId: string | null;
   onSelect: (id: string) => void;
+  onEditAndResend: (flow: HttpFlow) => void;
   markedFlowId: string | null;
   compareTargetFlowId: string | null;
   onMarkForCompare: (flow: HttpFlow) => void;
@@ -44,6 +45,12 @@ function getContentType(headers?: HttpHeaders): string {
   if (ct.includes('image')) return 'Image';
   if (ct.includes('text')) return 'Text';
   return ct.split(';')[0].split('/').pop() || '';
+}
+
+function getFlowContentType(flow: HttpFlow): string {
+  if (flow.streamKind === 'websocket') return 'WebSocket';
+  if (flow.streamKind === 'sse') return 'SSE';
+  return getContentType(flow.response?.headers);
 }
 
 function formatHeaders(headers: HttpHeaders): string {
@@ -84,7 +91,7 @@ function getSortValue(flow: HttpFlow, column: ColumnKey): string | number {
         ?? (flow.tags.includes('graphql') ? 'graphql' : '');
     case 'url': return flow.request.path || flow.request.url;
     case 'host': return flow.request.host;
-    case 'type': return getContentType(flow.response?.headers);
+    case 'type': return getFlowContentType(flow);
     case 'size': return flow.response?.bodySize ?? 0;
     case 'time': return flow.response?.duration ?? 0;
   }
@@ -144,6 +151,7 @@ export default function TrafficList({
   flows,
   selectedId,
   onSelect,
+  onEditAndResend,
   markedFlowId,
   compareTargetFlowId,
   onMarkForCompare,
@@ -297,6 +305,11 @@ export default function TrafficList({
         onClick: () => quickAddCaptureRule(flow, 'allow-list'),
       },
       {
+        label: 'Edit and Resend',
+        icon: '✍️',
+        onClick: () => onEditAndResend(flow),
+      },
+      {
         label: 'Repeat Request',
         icon: '↻',
         onClick: async () => {
@@ -340,7 +353,7 @@ export default function TrafficList({
         },
       },
     ];
-  }, [compareTargetFlowId, markedFlowId, onClearComparison, onCompareWithMarked, onMarkForCompare, quickAddCaptureRule]);
+  }, [compareTargetFlowId, markedFlowId, onClearComparison, onCompareWithMarked, onEditAndResend, onMarkForCompare, quickAddCaptureRule]);
 
   if (flows.length === 0) {
     return (

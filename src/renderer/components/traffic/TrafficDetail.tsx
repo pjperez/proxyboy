@@ -3,6 +3,7 @@ import RequestView from './RequestView';
 import ResponseView from './ResponseView';
 import ResponseDiff from './ResponseDiff';
 import CookieView from './CookieView';
+import StreamView from './StreamView';
 import type { HttpFlow } from '../../../shared/types';
 
 interface Props {
@@ -12,7 +13,7 @@ interface Props {
   onClose: () => void;
 }
 
-type Tab = 'request' | 'response' | 'compare' | 'cookies' | 'preview' | 'timing';
+type Tab = 'request' | 'response' | 'compare' | 'cookies' | 'preview' | 'stream' | 'timing';
 
 function isImageFlow(flow: HttpFlow): boolean {
   const ct = flow.response?.headers?.['content-type'];
@@ -28,6 +29,7 @@ export default function TrafficDetail({ flow, comparisonFlow = null, onClearComp
   const hasPreview = isImageFlow(flow);
   const hasCookies = hasHeaderValue(flow.request.headers.cookie) || hasHeaderValue(flow.response?.headers['set-cookie']);
   const hasComparison = Boolean(flow.response && comparisonFlow?.response);
+  const hasStream = flow.streamKind === 'websocket' || flow.streamKind === 'sse';
   const [tab, setTab] = useState<Tab>(hasPreview ? 'preview' : 'request');
   const hasSslPinningWarning = flow.tags.includes('ssl-pinning-suspected');
   const sslPinningMessage = flow.notes?.split('\n').slice(0, 3).join(' ');
@@ -38,6 +40,7 @@ export default function TrafficDetail({ flow, comparisonFlow = null, onClearComp
     { id: 'compare', label: 'Compare', show: hasComparison },
     { id: 'cookies', label: 'Cookies', show: hasCookies },
     { id: 'preview', label: '🖼 Preview', show: hasPreview },
+    { id: 'stream', label: flow.streamKind === 'websocket' ? 'Frames' : 'Events', show: hasStream },
     { id: 'timing', label: 'Timing', show: true },
   ];
 
@@ -45,11 +48,12 @@ export default function TrafficDetail({ flow, comparisonFlow = null, onClearComp
     if (
       (tab === 'cookies' && !hasCookies) ||
       (tab === 'preview' && !hasPreview) ||
-      (tab === 'compare' && !hasComparison)
+      (tab === 'compare' && !hasComparison) ||
+      (tab === 'stream' && !hasStream)
     ) {
       setTab(hasPreview ? 'preview' : 'request');
     }
-  }, [hasComparison, hasCookies, hasPreview, tab]);
+  }, [hasComparison, hasCookies, hasPreview, hasStream, tab]);
 
   useEffect(() => {
     if (hasComparison) {
@@ -137,7 +141,7 @@ export default function TrafficDetail({ flow, comparisonFlow = null, onClearComp
           </div>
         )}
         {tab === 'request' && <RequestView request={flow.request} />}
-        {tab === 'response' && flow.response && <ResponseView response={flow.response} />}
+        {tab === 'response' && flow.response && <ResponseView response={flow.response} requestPath={flow.request.path} />}
         {tab === 'response' && !flow.response && (
           <div className="text-pb-text-dim text-sm">Waiting for response...</div>
         )}
@@ -145,6 +149,7 @@ export default function TrafficDetail({ flow, comparisonFlow = null, onClearComp
           <ResponseDiff markedFlow={comparisonFlow} selectedFlow={flow} />
         )}
         {tab === 'cookies' && <CookieView flow={flow} />}
+        {tab === 'stream' && hasStream && <StreamView flow={flow} />}
         {tab === 'preview' && imageDataUrl && (
           <div className="flex flex-col items-center gap-4">
             <div

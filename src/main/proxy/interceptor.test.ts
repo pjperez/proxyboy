@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { MapRemoteRule } from '../../shared/types';
 import { Interceptor } from './interceptor';
 
 describe('Interceptor regex hardening', () => {
@@ -97,5 +98,27 @@ describe('Interceptor capture filters', () => {
 
     expect(interceptor.shouldCapture('https://example.com/api/users', 'GET')).toBe(true);
     expect(interceptor.shouldCapture('https://example.com/static/app.js', 'GET')).toBe(true);
+  });
+});
+
+describe('Interceptor map remote rules', () => {
+  it('returns the first enabled map-remote rule that matches the request', () => {
+    const interceptor = new Interceptor();
+    const mapRemoteRule: MapRemoteRule = {
+      id: 'map-remote-api',
+      type: 'map-remote',
+      name: 'Route API to staging',
+      enabled: true,
+      matchCriteria: { urlPattern: '*://api.example.com/*', methods: ['GET'] },
+      destinationUrl: 'https://staging.example.net',
+      preservePath: true,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    interceptor.setRules([mapRemoteRule]);
+
+    const matchedRule = interceptor.getMapRemoteRule('https://api.example.com/users', 'GET');
+    expect(matchedRule?.destinationUrl).toBe('https://staging.example.net');
+    expect(interceptor.getMapRemoteRule('https://api.example.com/users', 'POST')).toBeNull();
   });
 });
