@@ -1,3 +1,4 @@
+import { APP_NAME, APP_VERSION } from '../../shared/constants';
 import { HttpFlow } from '../../shared/types';
 
 interface HarLog {
@@ -34,8 +35,8 @@ export function flowsToHar(flows: HttpFlow[]): string {
     log: {
       version: '1.2',
       creator: {
-        name: 'ProxyBoy',
-        version: '1.0.0',
+        name: APP_NAME,
+        version: APP_VERSION,
       },
       entries: flows
         .filter(f => f.response)
