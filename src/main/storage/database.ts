@@ -151,13 +151,23 @@ function initializeSchema(database: SqlJsDatabase): void {
       FOREIGN KEY (conversation_id) REFERENCES agent_conversations(id) ON DELETE CASCADE
     );
   `);
+  database.run(`
+    CREATE TABLE IF NOT EXISTS sessions (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+  `);
   database.run('CREATE INDEX IF NOT EXISTS idx_requests_flow_id ON requests(flow_id);');
   database.run('CREATE INDEX IF NOT EXISTS idx_responses_flow_id ON responses(flow_id);');
   database.run('CREATE INDEX IF NOT EXISTS idx_requests_url ON requests(url);');
   database.run('CREATE INDEX IF NOT EXISTS idx_requests_method ON requests(method);');
   database.run('CREATE INDEX IF NOT EXISTS idx_responses_status_code ON responses(status_code);');
   database.run('CREATE INDEX IF NOT EXISTS idx_agent_messages_conversation ON agent_messages(conversation_id);');
+  database.run('CREATE INDEX IF NOT EXISTS idx_flows_session_id ON flows(session_id);');
   ensureColumn(database, 'flows', 'timing', 'TEXT');
+  ensureColumn(database, 'flows', 'session_id', 'TEXT');
   ensureColumn(database, 'requests', 'body_encoding', "TEXT DEFAULT 'utf8'");
   ensureColumn(database, 'requests', 'graphql_operation_type', 'TEXT');
   ensureColumn(database, 'requests', 'graphql_operation_name', 'TEXT');

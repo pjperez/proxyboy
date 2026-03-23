@@ -18,8 +18,10 @@ import BreakpointPauseDialog from './components/rules/BreakpointPauseDialog';
 import { useTrafficStore } from './stores/traffic';
 import { useRulesStore } from './stores/rules';
 import { useAppStore } from './stores/app';
+import { useSessionStore } from './stores/sessions';
 import { flowToCurl } from './utils/curl';
 import { clearTrafficFlows, deleteTrafficFlow, exportHarFile, importHarFile, toggleProxyRecording } from './utils/app-actions';
+import TabBar from './components/layout/TabBar';
 import { getNextSelectedFlowIdAfterDelete } from './utils/shortcuts';
 import { applyThemePreference, watchSystemTheme } from './utils/theme';
 import { normalizeThrottleSettings } from '../shared/throttle';
@@ -153,11 +155,34 @@ function MainApp() {
       setUpdateState(state);
     });
 
-    api.traffic.getFlows().then((loadedFlows: any[]) => {
-      if (Array.isArray(loadedFlows)) {
-        setFlows(loadedFlows);
+    // Load sessions first, then load flows for the active session
+    const initSessions = async () => {
+      try {
+        const [sessions, activeId] = await Promise.all([
+          api.sessions.list(),
+          api.sessions.getActive(),
+        ]);
+        if (Array.isArray(sessions) && sessions.length > 0) {
+          useSessionStore.getState().setSessions(sessions);
+        }
+        if (activeId) {
+          useSessionStore.getState().setActiveSessionId(activeId);
+        }
+      } catch {
+        // ignore
       }
-    }).catch(() => {});
+
+      // Load flows after session context is established
+      try {
+        const loadedFlows = await api.traffic.getFlows();
+        if (Array.isArray(loadedFlows)) {
+          setFlows(loadedFlows);
+        }
+      } catch {
+        // ignore
+      }
+    };
+    void initSessions();
 
     api.app.getUpdateState().then((state: any) => {
       if (state?.currentVersion) {
@@ -535,6 +560,7 @@ function MainApp() {
         <div className="flex flex-col flex-1 overflow-hidden">
           {selectedView === 'traffic' && (
             <>
+              <TabBar />
               <FilterBar />
               <div className="flex flex-1 overflow-hidden">
                 <div className={`${selectedFlow ? 'w-1/2' : 'w-full'} overflow-hidden border-r border-pb-border`}>

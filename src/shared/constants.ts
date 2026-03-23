@@ -71,6 +71,14 @@ export const IPC_CHANNELS = {
   DNS_GET_CONFIG: 'dns:get-config',
   DNS_SET_SERVERS: 'dns:set-servers',
   DNS_CLEAR_CACHE: 'dns:clear-cache',
+
+  // Sessions
+  SESSION_LIST: 'session:list',
+  SESSION_CREATE: 'session:create',
+  SESSION_RENAME: 'session:rename',
+  SESSION_DELETE: 'session:delete',
+  SESSION_SET_ACTIVE: 'session:set-active',
+  SESSION_GET_ACTIVE: 'session:get-active',
 } as const;
 
 export const DEFAULT_PROXY_PORT = 9090;
