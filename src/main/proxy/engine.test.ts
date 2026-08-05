@@ -129,6 +129,26 @@ describe('breakpoint request editing helpers', () => {
     expect(Buffer.from(edited.body as Buffer).toString('utf8')).toContain('goodbye');
   });
 
+  it('applies method and URL path/query edits to the buffered request', () => {
+    const request = createBreakpointRequest();
+
+    const edited = applyBreakpointRequestEdits(request, {
+      method: 'put',
+      url: 'https://api.example.com/v2/graphql?debug=1',
+      headers: {
+        host: 'api.example.com',
+        'content-type': 'application/json',
+      },
+      body: encodeBreakpointBody('{"query":"{ hello }"}'),
+    });
+
+    expect(edited.method).toBe('PUT');
+    expect(edited.host).toBe('api.example.com');
+    expect(edited.path).toBe('/v2/graphql?debug=1');
+    expect(edited.url).toBe('https://api.example.com/v2/graphql?debug=1');
+    expect(edited.headers.host).toBe('api.example.com');
+  });
+
   it('normalizes edited requests for forwarding', () => {
     const edited = prepareBreakpointRequestForForwarding(
       createBreakpointRequest({

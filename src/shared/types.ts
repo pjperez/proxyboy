@@ -278,6 +278,8 @@ export interface BreakpointPauseMessage {
 }
 
 export interface BreakpointRequestEdits {
+  method?: string;
+  url?: string;
   headers: HttpHeaders;
   body?: StoredBody;
 }

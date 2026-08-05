@@ -5,6 +5,7 @@ import StatusBar from './components/layout/StatusBar';
 import ShortcutHelpDialog from './components/layout/ShortcutHelpDialog';
 import TrafficList from './components/traffic/TrafficList';
 import TrafficDetail from './components/traffic/TrafficDetail';
+import HostTree from './components/traffic/HostTree';
 import FilterBar from './components/filters/FilterBar';
 import AgentPanel from './components/agent/AgentPanel';
 import ComposerPanel from './components/composer/ComposerPanel';
@@ -74,6 +75,7 @@ function MainApp() {
   const [showShortcutHelp, setShowShortcutHelp] = useState(false);
   const [agentWidth, setAgentWidth] = useState(384);
   const [selectedFlowId, setSelectedFlowId] = useState<string | null>(null);
+  const [selectedHost, setSelectedHost] = useState<string | null>(null);
 
   const handleAgentResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -220,6 +222,12 @@ function MainApp() {
   }, []);
 
   const filteredFlows = useMemo(() => getFilteredFlows(), [flows, filter]);
+  const hostScopedFlows = useMemo(() => {
+    if (!selectedHost) {
+      return filteredFlows;
+    }
+    return filteredFlows.filter((flow) => (flow.request.host || '(unknown)') === selectedHost);
+  }, [filteredFlows, selectedHost]);
   const selectedFlow = useMemo(
     () => selectedFlowId ? flows.find(f => f.id === selectedFlowId) ?? null : null,
     [flows, selectedFlowId]
@@ -241,6 +249,16 @@ function MainApp() {
       setSelectedFlowId(null);
     }
   }, [flows, selectedFlowId]);
+
+  useEffect(() => {
+    if (
+      selectedFlowId &&
+      selectedHost &&
+      !hostScopedFlows.some((flow) => flow.id === selectedFlowId)
+    ) {
+      setSelectedFlowId(null);
+    }
+  }, [hostScopedFlows, selectedFlowId, selectedHost]);
 
   const focusTrafficFilter = useCallback(() => {
     const input = document.getElementById('traffic-filter-input') as HTMLInputElement | null;
@@ -316,10 +334,10 @@ function MainApp() {
       return;
     }
 
-    if (filteredFlows.length > 0) {
-      setSelectedFlowId(filteredFlows[0].id);
+    if (hostScopedFlows.length > 0) {
+      setSelectedFlowId(hostScopedFlows[0].id);
     }
-  }, [filteredFlows, selectedFlowId, selectedView]);
+  }, [hostScopedFlows, selectedFlowId, selectedView]);
 
   const handleDeleteSelectedFlow = useCallback(async () => {
     if (selectedView !== 'traffic' || !selectedFlowId) {
@@ -333,12 +351,12 @@ function MainApp() {
     }
 
     const nextSelectedFlowId = getNextSelectedFlowIdAfterDelete(
-      filteredFlows.map((flow) => flow.id),
+      hostScopedFlows.map((flow) => flow.id),
       selectedFlowId,
     );
     removeFlow(selectedFlowId);
     setSelectedFlowId(nextSelectedFlowId);
-  }, [filteredFlows, removeFlow, selectedFlowId, selectedView, showActionError]);
+  }, [hostScopedFlows, removeFlow, selectedFlowId, selectedView, showActionError]);
 
   const handleMarkFlowForCompare = useCallback((flow: typeof flows[number]) => {
     if (!flow.response) {
@@ -501,21 +519,21 @@ function MainApp() {
         return;
       }
 
-      if (!isTypingTarget && selectedView === 'traffic' && filteredFlows.length > 0) {
+      if (!isTypingTarget && selectedView === 'traffic' && hostScopedFlows.length > 0) {
         const currentIndex = selectedFlowId
-          ? filteredFlows.findIndex((flow) => flow.id === selectedFlowId)
+          ? hostScopedFlows.findIndex((flow) => flow.id === selectedFlowId)
           : -1;
 
         if (e.key === 'ArrowDown') {
           e.preventDefault();
-          const nextIndex = Math.min(currentIndex + 1, filteredFlows.length - 1);
-          setSelectedFlowId(filteredFlows[nextIndex].id);
+          const nextIndex = Math.min(currentIndex + 1, hostScopedFlows.length - 1);
+          setSelectedFlowId(hostScopedFlows[nextIndex].id);
         }
 
         if (e.key === 'ArrowUp') {
           e.preventDefault();
           const nextIndex = currentIndex <= 0 ? 0 : currentIndex - 1;
-          setSelectedFlowId(filteredFlows[nextIndex].id);
+          setSelectedFlowId(hostScopedFlows[nextIndex].id);
         }
       }
     };
@@ -524,8 +542,8 @@ function MainApp() {
   }, [
     agentDetached,
     dismissPanels,
-    filteredFlows,
     focusTrafficFilter,
+    hostScopedFlows,
     handleClearTraffic,
     handleCompareWithMarked,
     handleCopySelectedFlowAsCurl,
@@ -563,9 +581,14 @@ function MainApp() {
               <TabBar />
               <FilterBar />
               <div className="flex flex-1 overflow-hidden">
-                <div className={`${selectedFlow ? 'w-1/2' : 'w-full'} overflow-hidden border-r border-pb-border`}>
+                <HostTree
+                  flows={filteredFlows}
+                  selectedHost={selectedHost}
+                  onSelectHost={setSelectedHost}
+                />
+                <div className={`${selectedFlow ? 'w-1/2' : 'flex-1'} overflow-hidden border-r border-pb-border`}>
                   <TrafficList
-                    flows={filteredFlows}
+                    flows={hostScopedFlows}
                     selectedId={selectedFlowId}
                     onSelect={setSelectedFlowId}
                     onEditAndResend={handleEditAndResend}
@@ -593,8 +616,6 @@ function MainApp() {
           {selectedView === 'composer' && <ComposerPanel draft={composerDraft} />}
           {selectedView === 'breakpoints' && <BreakpointEditor />}
           {selectedView === 'map-local' && <MapLocalEditor />}
-          {selectedView === 'map-remote' && <MapRemoteEditor />}
-          {selectedView === 'scripts' && <ScriptEditor selectedFlowId={selectedFlowId} />}
           {selectedView === 'map-remote' && <MapRemoteEditor />}
           {selectedView === 'scripts' && <ScriptEditor selectedFlowId={selectedFlowId} />}
           {selectedView === 'capture-rules' && <CaptureFilterEditor />}

@@ -329,13 +329,49 @@ export function applyBreakpointRequestEdits(
 ): HttpRequest {
   const body = edits ? decodeBreakpointBody(edits.body) : bodyToBuffer(request.body);
   const nextHeaders = edits ? cloneHeaders(edits.headers) : cloneHeaders(request.headers);
-  const host = getEditedHost(nextHeaders, request.host);
+  const method = (edits?.method?.trim() || request.method || 'GET').toUpperCase();
+
+  let protocol = request.protocol;
+  let host = getEditedHost(nextHeaders, request.host);
+  let path = request.path;
+  let url = `${protocol}://${host}${path}`;
+
+  if (edits?.url?.trim()) {
+    try {
+      const parsed = new URL(edits.url.trim());
+      const nextProtocol = parsed.protocol === 'https:' ? 'https' : parsed.protocol === 'http:' ? 'http' : null;
+      if (!nextProtocol) {
+        throw new Error('Unsupported protocol');
+      }
+      if (nextProtocol !== request.protocol) {
+        // Keep the original protocol for the in-flight MITM connection.
+        protocol = request.protocol;
+      } else {
+        protocol = nextProtocol;
+      }
+      host = parsed.host;
+      path = `${parsed.pathname || '/'}${parsed.search}`;
+      url = `${protocol}://${host}${path}`;
+    } catch {
+      // Fall back to host/header-derived URL when the edited URL is invalid.
+      host = getEditedHost(nextHeaders, request.host);
+      path = request.path;
+      url = `${protocol}://${host}${path}`;
+    }
+  } else {
+    host = getEditedHost(nextHeaders, request.host);
+    url = `${protocol}://${host}${path}`;
+  }
+
   setHeaderValue(nextHeaders, 'host', host);
 
   return {
     ...request,
+    method,
+    protocol,
     host,
-    url: `${request.protocol}://${host}${request.path}`,
+    path,
+    url,
     headers: nextHeaders,
     body,
     bodySize: body?.length ?? 0,

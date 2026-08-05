@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+﻿import { useEffect, useMemo, useState } from 'react';
 import type {
   BreakpointPauseMessage,
   BreakpointResumeMessage,
@@ -234,6 +234,8 @@ function BreakpointPauseDialog({
     [response?.body, response?.headers],
   );
 
+  const [requestMethod, setRequestMethod] = useState(request.method);
+  const [requestUrl, setRequestUrl] = useState(request.url);
   const [requestHeaders, setRequestHeaders] = useState<HeaderRow[]>(originalRequestHeaders);
   const [requestBody, setRequestBody] = useState<EditableBodyState>(originalRequestBody);
   const [responseHeaders, setResponseHeaders] = useState<HeaderRow[]>(originalResponseHeaders);
@@ -242,6 +244,8 @@ function BreakpointPauseDialog({
   const [statusMessage, setStatusMessage] = useState(response?.statusMessage ?? '');
 
   useEffect(() => {
+    setRequestMethod(request.method);
+    setRequestUrl(request.url);
     setRequestHeaders(originalRequestHeaders);
     setRequestBody(originalRequestBody);
     setResponseHeaders(originalResponseHeaders);
@@ -253,9 +257,30 @@ function BreakpointPauseDialog({
     originalRequestHeaders,
     originalResponseBody,
     originalResponseHeaders,
+    request.method,
+    request.url,
     response,
   ]);
 
+  const requestMethodModified = requestMethod.trim().toUpperCase() !== request.method.toUpperCase();
+  const requestUrlModified = requestUrl.trim() !== request.url;
+  const requestUrlError = useMemo(() => {
+    if (phase !== 'request') {
+      return null;
+    }
+    try {
+      const parsed = new URL(requestUrl.trim());
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        return 'URL must use http:// or https://';
+      }
+      if ((parsed.protocol === 'https:' ? 'https' : 'http') !== request.protocol) {
+        return `Keep the original ${request.protocol.toUpperCase()} protocol for this paused connection.`;
+      }
+      return null;
+    } catch {
+      return 'Enter a valid absolute URL.';
+    }
+  }, [phase, request.protocol, requestUrl]);
   const requestHeadersModified = useMemo(
     () => !headersEqual(buildHeaders(requestHeaders), buildHeaders(originalRequestHeaders)),
     [originalRequestHeaders, requestHeaders],
@@ -282,6 +307,8 @@ function BreakpointPauseDialog({
   );
 
   const reset = () => {
+    setRequestMethod(request.method);
+    setRequestUrl(request.url);
     setRequestHeaders(originalRequestHeaders);
     setRequestBody(originalRequestBody);
     setResponseHeaders(originalResponseHeaders);
@@ -292,11 +319,33 @@ function BreakpointPauseDialog({
 
   const forward = () => {
     if (phase === 'request') {
+      if (requestUrlError || !requestMethod.trim()) {
+        return;
+      }
+
+      const nextHeaders = buildHeaders(requestHeaders);
+      try {
+        const parsed = new URL(requestUrl.trim());
+        if (!Object.keys(nextHeaders).some((key) => key.toLowerCase() === 'host')) {
+          nextHeaders.Host = parsed.host;
+        } else {
+          for (const key of Object.keys(nextHeaders)) {
+            if (key.toLowerCase() === 'host') {
+              nextHeaders[key] = parsed.host;
+            }
+          }
+        }
+      } catch {
+        // validated above
+      }
+
       onResume({
         flowId: flow.id,
         action: 'forward',
         request: {
-          headers: buildHeaders(requestHeaders),
+          method: requestMethod.trim().toUpperCase(),
+          url: requestUrl.trim(),
+          headers: nextHeaders,
           body: requestBody.data === '' && originalRequestBody.data === ''
             ? undefined
             : { data: requestBody.data, encoding: requestBody.encoding },
@@ -333,31 +382,59 @@ function BreakpointPauseDialog({
                 Breakpoint paused on {phase}
               </h2>
               <p className="mt-1 text-sm text-slate-400">
-                {request.method} {request.url}
+                {requestMethod || request.method} {requestUrl || request.url}
               </p>
             </div>
             <SectionBadge
               modified={phase === 'request'
-                ? requestHeadersModified || requestBodyModified
+                ? requestMethodModified || requestUrlModified || requestHeadersModified || requestBodyModified
                 : responseHeadersModified || responseBodyModified || responseStatusModified}
             />
           </div>
         </div>
 
         <div className="flex-1 space-y-6 overflow-y-auto px-6 py-5">
-          <div className="grid gap-4 md:grid-cols-2">
-            <div className="rounded border border-slate-800 bg-slate-950/60 p-4">
-              <div className="text-xs uppercase tracking-wide text-slate-400">Method</div>
-              <div className="mt-1 text-sm text-slate-100">{request.method}</div>
-            </div>
-            <div className="rounded border border-slate-800 bg-slate-950/60 p-4">
-              <div className="text-xs uppercase tracking-wide text-slate-400">URL</div>
-              <div className="mt-1 break-all text-sm text-slate-100">{request.url}</div>
-            </div>
-          </div>
-
           {phase === 'request' ? (
             <div className="space-y-6">
+              <div className="grid gap-4 md:grid-cols-[160px_minmax(0,1fr)]">
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs uppercase tracking-wide text-slate-400">Method</label>
+                    <SectionBadge modified={requestMethodModified} />
+                  </div>
+                  <input
+                    className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm uppercase text-slate-100"
+                    value={requestMethod}
+                    onChange={(event) => setRequestMethod(event.target.value)}
+                    list="proxyboy-http-methods"
+                    spellCheck={false}
+                  />
+                  <datalist id="proxyboy-http-methods">
+                    {['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'].map((method) => (
+                      <option key={method} value={method} />
+                    ))}
+                  </datalist>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs uppercase tracking-wide text-slate-400">URL</label>
+                    <SectionBadge modified={requestUrlModified} />
+                  </div>
+                  <input
+                    className="w-full rounded border border-slate-700 bg-slate-950 px-3 py-2 font-mono text-sm text-slate-100"
+                    value={requestUrl}
+                    onChange={(event) => setRequestUrl(event.target.value)}
+                    spellCheck={false}
+                  />
+                  {requestUrlError ? (
+                    <p className="text-xs text-red-300">{requestUrlError}</p>
+                  ) : (
+                    <p className="text-xs text-slate-400">
+                      Edit host, path, or query. Protocol must stay {request.protocol.toUpperCase()} for this paused socket.
+                    </p>
+                  )}
+                </div>
+              </div>
               <HeaderEditor
                 label="Request headers"
                 rows={requestHeaders}
@@ -373,6 +450,16 @@ function BreakpointPauseDialog({
             </div>
           ) : response ? (
             <div className="space-y-6">
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded border border-slate-800 bg-slate-950/60 p-4">
+                  <div className="text-xs uppercase tracking-wide text-slate-400">Method</div>
+                  <div className="mt-1 text-sm text-slate-100">{request.method}</div>
+                </div>
+                <div className="rounded border border-slate-800 bg-slate-950/60 p-4">
+                  <div className="text-xs uppercase tracking-wide text-slate-400">URL</div>
+                  <div className="mt-1 break-all text-sm text-slate-100">{request.url}</div>
+                </div>
+              </div>
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h4 className="text-sm font-semibold text-slate-100">Response status</h4>
@@ -443,7 +530,7 @@ function BreakpointPauseDialog({
               type="button"
               className="rounded bg-emerald-500 px-4 py-2 text-sm font-medium text-slate-950 hover:bg-emerald-400 disabled:cursor-not-allowed disabled:opacity-60"
               onClick={forward}
-              disabled={invalidStatusCode}
+              disabled={invalidStatusCode || Boolean(requestUrlError) || (phase === 'request' && !requestMethod.trim())}
             >
               Forward
             </button>
