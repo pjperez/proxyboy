@@ -227,15 +227,14 @@ export default function TrafficList({
     });
   }, [flows]);
 
-  // Keep multi-select in sync with external single selection
+  // Keep multi-select in sync with external single selection (e.g. keyboard nav)
   useEffect(() => {
     if (!selectedId) return;
     setSelectedIds((prev) => {
-      if (prev.size <= 1 && prev.has(selectedId)) return prev;
-      if (prev.size > 1 && prev.has(selectedId)) return prev;
+      if (prev.has(selectedId)) return prev;
       return new Set([selectedId]);
     });
-    setAnchorId(selectedId);
+    setAnchorId((prev) => prev ?? selectedId);
   }, [selectedId]);
 
   const toggleColumn = useCallback((key: ColumnKey) => {
