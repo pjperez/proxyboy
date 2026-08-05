@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import { parseGraphQLRequest } from '../../../shared/graphql';
 import { isProtobufContentType, type ProtobufDecodeResult, type ProtobufRawField } from '../../../shared/protobuf';
+import { isUrlEncodedForm, parseUrlEncodedForm } from '../../utils/request-parts';
 
 interface Props {
   body: string;
@@ -45,6 +46,150 @@ function renderRawFields(fields: ProtobufRawField[]): string {
   return JSON.stringify(fields, null, 2);
 }
 
+interface BodySearchProps {
+  text: string;
+  textClassName: string;
+  onCopy: () => void;
+}
+
+function BodySearchView({ text, textClassName, onCopy }: BodySearchProps) {
+  const [query, setQuery] = useState('');
+  const [currentMatch, setCurrentMatch] = useState(0);
+
+  const matchIndexes = useMemo(() => {
+    if (!query) return [] as number[];
+    const indexes: number[] = [];
+    const lowerText = text.toLowerCase();
+    const lowerQuery = query.toLowerCase();
+    let from = 0;
+    while (from <= lowerText.length - lowerQuery.length) {
+      const idx = lowerText.indexOf(lowerQuery, from);
+      if (idx === -1) break;
+      indexes.push(idx);
+      from = idx + Math.max(lowerQuery.length, 1);
+    }
+    return indexes;
+  }, [query, text]);
+
+  useEffect(() => {
+    setCurrentMatch(0);
+  }, [query, text]);
+
+  useEffect(() => {
+    if (matchIndexes.length === 0) {
+      setCurrentMatch(0);
+      return;
+    }
+    if (currentMatch >= matchIndexes.length) {
+      setCurrentMatch(0);
+    }
+  }, [currentMatch, matchIndexes]);
+
+  const goPrev = useCallback(() => {
+    if (matchIndexes.length === 0) return;
+    setCurrentMatch((prev) => (prev - 1 + matchIndexes.length) % matchIndexes.length);
+  }, [matchIndexes.length]);
+
+  const goNext = useCallback(() => {
+    if (matchIndexes.length === 0) return;
+    setCurrentMatch((prev) => (prev + 1) % matchIndexes.length);
+  }, [matchIndexes.length]);
+
+  const highlighted = useMemo(() => {
+    if (!query || matchIndexes.length === 0) {
+      return text;
+    }
+
+    const parts: React.ReactNode[] = [];
+    let lastIndex = 0;
+    const qLen = query.length;
+
+    matchIndexes.forEach((start, i) => {
+      if (start > lastIndex) {
+        parts.push(text.slice(lastIndex, start));
+      }
+      const end = start + qLen;
+      const isCurrent = i === currentMatch;
+      parts.push(
+        <mark
+          key={`${start}-${i}`}
+          id={isCurrent ? 'body-viewer-current-match' : undefined}
+          className={
+            isCurrent
+              ? 'bg-pb-accent text-white rounded-sm px-0.5'
+              : 'bg-pb-warning/40 text-pb-text rounded-sm px-0.5'
+          }
+        >
+          {text.slice(start, end)}
+        </mark>,
+      );
+      lastIndex = end;
+    });
+
+    if (lastIndex < text.length) {
+      parts.push(text.slice(lastIndex));
+    }
+
+    return parts;
+  }, [currentMatch, matchIndexes, query, text]);
+
+  useEffect(() => {
+    if (!query || matchIndexes.length === 0) return;
+    const el = document.getElementById('body-viewer-current-match');
+    el?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [currentMatch, matchIndexes.length, query]);
+
+  const matchLabel = matchIndexes.length === 0
+    ? '0/0'
+    : `${currentMatch + 1}/${matchIndexes.length}`;
+
+  return (
+    <div className="bg-pb-bg rounded border border-pb-border overflow-hidden max-h-96 flex flex-col">
+      <div className="flex items-center gap-2 px-3 py-1.5 border-b border-pb-border bg-pb-surface shrink-0">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Find in body"
+          className="h-6 flex-1 min-w-0 bg-pb-bg border border-pb-border rounded px-2 text-[11px] text-pb-text placeholder-pb-text-dim focus:outline-none focus:border-pb-accent"
+        />
+        <span className="text-[10px] text-pb-text-dim tabular-nums shrink-0 w-10 text-center">
+          {query ? matchLabel : ''}
+        </span>
+        <button
+          type="button"
+          onClick={goPrev}
+          disabled={matchIndexes.length === 0}
+          className="px-1.5 py-0.5 text-[10px] rounded bg-pb-border text-pb-text-dim hover:text-pb-text disabled:opacity-40 disabled:cursor-not-allowed"
+          title="Previous match"
+        >
+          Prev
+        </button>
+        <button
+          type="button"
+          onClick={goNext}
+          disabled={matchIndexes.length === 0}
+          className="px-1.5 py-0.5 text-[10px] rounded bg-pb-border text-pb-text-dim hover:text-pb-text disabled:opacity-40 disabled:cursor-not-allowed"
+          title="Next match"
+        >
+          Next
+        </button>
+        <button
+          type="button"
+          onClick={onCopy}
+          className="px-2 py-0.5 text-[10px] rounded bg-pb-accent/15 text-pb-accent hover:bg-pb-accent/25 font-medium"
+          title="Copy body"
+        >
+          Copy
+        </button>
+      </div>
+      <pre className={`p-3 text-xs font-mono whitespace-pre-wrap break-all overflow-auto flex-1 ${textClassName}`}>
+        {highlighted}
+      </pre>
+    </div>
+  );
+}
+
 export default function BodyViewer({
   body,
   contentType,
@@ -55,9 +200,9 @@ export default function BodyViewer({
 }: Props) {
   const isImage = contentType.startsWith('image/');
   const [showDecoded, setShowDecoded] = useState(true);
-  const [protobufResult, setProtobufResult] = React.useState<ProtobufDecodeResult | null>(null);
-  const [protobufError, setProtobufError] = React.useState<string | null>(null);
-  const [protobufLoading, setProtobufLoading] = React.useState(false);
+  const [protobufResult, setProtobufResult] = useState<ProtobufDecodeResult | null>(null);
+  const [protobufError, setProtobufError] = useState<string | null>(null);
+  const [protobufLoading, setProtobufLoading] = useState(false);
   const shouldAttemptProtobuf = !isImage && showDecoded && isProtobufContentType(contentType);
 
   // For base64 non-image bodies, attempt to decode/decompress
@@ -72,7 +217,13 @@ export default function BodyViewer({
     return parseGraphQLRequest(displayBody, contentType);
   }, [contentType, detectGraphQL, displayBody, isBase64, isImage]);
 
-  React.useEffect(() => {
+  const formFields = useMemo(() => {
+    if (isImage || isBase64 || graphqlRequest) return null;
+    if (!isUrlEncodedForm(contentType)) return null;
+    return parseUrlEncodedForm(displayBody);
+  }, [contentType, displayBody, graphqlRequest, isBase64, isImage]);
+
+  useEffect(() => {
     let cancelled = false;
 
     if (!shouldAttemptProtobuf) {
@@ -127,6 +278,10 @@ export default function BodyViewer({
     }
     return displayBody;
   }, [displayBody, contentType, isImage]);
+
+  const handleCopyFormatted = useCallback(() => {
+    void navigator.clipboard.writeText(formatted);
+  }, [formatted]);
 
   if (isImage && isBase64) {
     const dataUrl = `data:${contentType};base64,${body}`;
@@ -252,14 +407,61 @@ export default function BodyViewer({
     );
   }
 
+  if (formFields) {
+    const formText = formFields.map((f) => `${f.key}=${f.value}`).join('\n');
+    return (
+      <div className="bg-pb-bg rounded border border-pb-border overflow-hidden max-h-96 flex flex-col">
+        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-pb-border bg-pb-surface shrink-0">
+          <span className="rounded bg-pb-accent/15 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-pb-accent">
+            Form
+          </span>
+          <span className="text-[10px] text-pb-text-dim">{formFields.length} field{formFields.length === 1 ? '' : 's'}</span>
+          <button
+            type="button"
+            onClick={() => void navigator.clipboard.writeText(formText)}
+            className="ml-auto px-2 py-0.5 text-[10px] rounded bg-pb-accent/15 text-pb-accent hover:bg-pb-accent/25 font-medium"
+            title="Copy form fields"
+          >
+            Copy
+          </button>
+        </div>
+        <div className="overflow-auto flex-1">
+          <table className="w-full text-xs">
+            <thead className="sticky top-0 bg-pb-surface border-b border-pb-border">
+              <tr className="text-left text-[10px] uppercase tracking-wide text-pb-text-dim">
+                <th className="px-3 py-1.5 font-semibold w-1/3">Name</th>
+                <th className="px-3 py-1.5 font-semibold">Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {formFields.length === 0 ? (
+                <tr>
+                  <td colSpan={2} className="px-3 py-3 text-pb-text-dim">No form fields</td>
+                </tr>
+              ) : (
+                formFields.map((field, index) => (
+                  <tr key={`${field.key}-${index}`} className="border-b border-pb-border/40 align-top">
+                    <td className="px-3 py-1.5 font-mono text-pb-info break-all">{field.key}</td>
+                    <td className="px-3 py-1.5 font-mono text-pb-text break-all whitespace-pre-wrap">{field.value}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  }
+
   const isJson = contentType.includes('json');
   const isHtml = contentType.includes('html');
   const isXml = contentType.includes('xml');
+  const textClassName = isJson ? 'text-pb-info' : isHtml || isXml ? 'text-pb-warning' : 'text-pb-text';
 
   return (
-    <div className="bg-pb-bg rounded border border-pb-border overflow-auto max-h-96">
+    <div className="space-y-0">
       {isBase64 && !isImage && (
-        <div className="flex items-center gap-2 px-3 py-1.5 border-b border-pb-border bg-pb-surface">
+        <div className="flex items-center gap-2 px-3 py-1.5 border border-b-0 border-pb-border bg-pb-surface rounded-t">
           <span className="text-[10px] text-pb-text-dim">
             {decoded ? '✓ Decoded' : '⚠ Binary'}
           </span>
@@ -276,11 +478,11 @@ export default function BodyViewer({
           {protobufLoading && <span className="text-[10px] text-pb-text-dim">Protobuf…</span>}
         </div>
       )}
-      <pre className={`p-3 text-xs font-mono whitespace-pre-wrap break-all
-        ${isJson ? 'text-pb-info' : isHtml || isXml ? 'text-pb-warning' : 'text-pb-text'}`}
-      >
-        {formatted}
-      </pre>
+      <BodySearchView
+        text={formatted}
+        textClassName={textClassName}
+        onCopy={handleCopyFormatted}
+      />
     </div>
   );
 }

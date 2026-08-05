@@ -24,17 +24,20 @@ ProxyBoy is a man-in-the-middle (MITM) HTTP/HTTPS proxy that captures, inspects,
 - **Upstream Proxy Chaining** — Forward traffic through HTTP or SOCKS5 upstream proxies with bypass patterns and secure credential storage
 - **Cookie Inspector** — Parse request cookies and `Set-Cookie` headers into a structured, searchable view
 - **AI Assistant** — Chat panel powered by GitHub Copilot that can search traffic, analyze patterns, create rules, and export data
-- **Breakpoint Rules** — Pause requests/responses mid-flight, inspect them, then forward or drop
-- **Map Local Rules** — Serve local files instead of remote responses for mocking APIs
+- **Breakpoint Rules** — Pause requests/responses mid-flight, edit method/URL/headers/body/status, then forward or drop
+- **Map Local Rules** — Serve a local file instead of a remote response for mocking APIs
 - **Map Remote Rules** — Forward matching requests to a different upstream host without changing your client
 - **Capture Rules** — Switch between capture-all, allow-list, and block-list modes to control what gets recorded
+- **Host Tree** — Browse captured traffic by host with per-host counts and quick filtering
+- **Query Params & Form Body Views** — Inspect URL query strings and form-encoded bodies in structured tables
+- **Find in Body** — Search within request/response body content in the detail viewer
 - **System Proxy Integration** — Toggle Windows system proxy on/off from the app
 - **HAR Export/Import** — Standard HAR format for sharing captures with other tools
 - **Configurable Columns** — Show/hide columns, sort by any field, timestamps
 - **Body Search** — Include request and response text bodies in traffic filtering when you need deeper search
 - **WebSocket and SSE Inspection** — Capture live WebSocket frames and Server-Sent Events in the traffic detail view
 - **Script Rules** — Run sandboxed JavaScript rules to rewrite requests and responses without leaving the app
-- **Copy as cURL** — Right-click any request to copy it as a cURL command
+- **Copy as cURL / Fetch / PowerShell** — Right-click any request to copy it as cURL, browser Fetch, or PowerShell
 - **Keyboard Shortcuts** — Fast access to proxy control, HAR import/export, filtering, and traffic actions
 - **Theme Modes** — Dark, Light, or System theme selection with live switching
 - **Detachable AI Panel** — Pop the assistant out into its own window
@@ -162,17 +165,19 @@ src/
 
 ## Known Limitations
 
-- **Windows only** — System proxy integration uses Windows registry; the rest could theoretically work cross-platform
-- **No request/response editing in breakpoints** — You can inspect and forward/drop, but not modify (yet)
+- **Windows only** — System proxy integration uses Windows registry; the goal is a strong Windows-native Proxyman-style alternative (AI included), not a half-port of another OS experience
+- **No reverse proxy mode** — ProxyBoy is a forward debugging proxy, not a reverse/ingress proxy
+- **HTTP/2 is not first-class** — Capture and inspection are oriented around HTTP/1.x today
+- **Map Local is single-file only** — Rules map a match to one local file, not a directory tree
 - **SSL inspection quirks** — Some sites with certificate pinning or HSTS preload may not work through the proxy
 - **Cloudflare challenges** — Sites behind Cloudflare browser challenges will typically fail through any MITM proxy
-- **Very limited automated tests** — There is a small test foothold now, but coverage is still far from production-ready 🙃
+- **Limited automated tests** — There is a growing test foothold, but coverage is still far from production-ready 🙃
 
 ---
 
 ## Acknowledgments
 
-- **[Proxyman](https://proxyman.io/)** — The primary inspiration. Seriously, go use Proxyman if you want a polished, reliable proxy tool. It's great.
+- **[Proxyman](https://proxyman.io/)** — The primary inspiration. ProxyBoy aims to be a capable Windows-native alternative even before the AI features; Proxyman remains the polished benchmark if you want a mature cross-platform product today.
 - **[Charles Proxy](https://www.charlesproxy.com/)** and **[Fiddler](https://www.telerik.com/fiddler)** — Other excellent tools in this space
 - **[GitHub Copilot](https://github.com/features/copilot)** — Powers the AI assistant, and also helped build this entire app
 

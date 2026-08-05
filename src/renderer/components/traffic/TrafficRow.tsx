@@ -6,7 +6,7 @@ import { getTrafficRowAccentColor, type TrafficRowColorMode } from '../../utils/
 interface Props {
   flow: HttpFlow;
   selected: boolean;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, e?: React.MouseEvent) => void;
   onContextMenu?: (e: React.MouseEvent, flow: HttpFlow) => void;
   visibleColumns: Set<ColumnKey>;
   colorMode: TrafficRowColorMode;
@@ -94,7 +94,7 @@ function TrafficRowInner({
 
   return (
     <div
-      onClick={() => onSelect(flow.id)}
+      onClick={(e) => onSelect(flow.id, e)}
       onContextMenu={(e) => onContextMenu?.(e, flow)}
       className={`flex items-center h-8 px-3 text-xs cursor-pointer border-b border-l-[3px] border-pb-border/30 transition-colors
         ${selected ? 'bg-pb-accent/15 text-pb-text' : 'hover:bg-pb-surface-hover text-pb-text'}`}

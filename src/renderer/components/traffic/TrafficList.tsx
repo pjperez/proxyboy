@@ -4,8 +4,11 @@ import TrafficRow from './TrafficRow';
 import ContextMenu from './ContextMenu';
 import type { ContextMenuItem } from './ContextMenu';
 import { flowToCurl } from '../../utils/curl';
+import { flowToFetch, flowToPowerShell } from '../../utils/export-formats';
+import { deleteTrafficFlow } from '../../utils/app-actions';
 import { useAppStore } from '../../stores/app';
 import { useRulesStore } from '../../stores/rules';
+import { useTrafficStore } from '../../stores/traffic';
 import type { HttpFlow, HttpHeaders } from '../../../shared/types';
 
 export type ColumnKey = 'timestamp' | 'method' | 'status' | 'graphql' | 'url' | 'host' | 'type' | 'size' | 'time';
@@ -77,6 +80,36 @@ function getQuickAddRulePattern(flow: HttpFlow): { hostLabel: string; urlPattern
     };
   } catch {
     return null;
+  }
+}
+
+function getExactUrlPattern(flow: HttpFlow): { label: string; urlPattern: string } | null {
+  const url = flow.request.url;
+  if (!url) return null;
+  return {
+    label: url.length > 60 ? `${url.slice(0, 57)}...` : url,
+    urlPattern: `^${escapeRegex(url)}$`,
+  };
+}
+
+function getMapRemoteHostPattern(flow: HttpFlow): { hostLabel: string; urlPattern: string; origin: string } | null {
+  try {
+    const parsedUrl = new URL(flow.request.url);
+    const hostLabel = parsedUrl.hostname || flow.request.host;
+    if (!hostLabel) return null;
+    return {
+      hostLabel,
+      origin: parsedUrl.origin,
+      urlPattern: `*://${hostLabel}/*`,
+    };
+  } catch {
+    const hostLabel = flow.request.host;
+    if (!hostLabel) return null;
+    return {
+      hostLabel,
+      origin: `https://${hostLabel}`,
+      urlPattern: `*://${hostLabel}/*`,
+    };
   }
 }
 
@@ -159,10 +192,13 @@ export default function TrafficList({
   onClearComparison,
 }: Props) {
   const trafficRowColorMode = useAppStore((state) => state.trafficRowColorMode);
+  const removeFlow = useTrafficStore((state) => state.removeFlow);
   const [sort, setSort] = useState<SortState>({ column: null, direction: 'asc' });
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [visibleColumns, setVisibleColumns] = useState<Set<ColumnKey>>(loadVisibleColumns);
   const [showColumnPicker, setShowColumnPicker] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [anchorId, setAnchorId] = useState<string | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
 
   // Close column picker on outside click
@@ -176,6 +212,30 @@ export default function TrafficList({
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, [showColumnPicker]);
+
+  // Drop multi-select ids that are no longer in the list
+  useEffect(() => {
+    const flowIdSet = new Set(flows.map((flow) => flow.id));
+    setSelectedIds((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      prev.forEach((id) => {
+        if (flowIdSet.has(id)) next.add(id);
+        else changed = true;
+      });
+      return changed ? next : prev;
+    });
+  }, [flows]);
+
+  // Keep multi-select in sync with external single selection (e.g. keyboard nav)
+  useEffect(() => {
+    if (!selectedId) return;
+    setSelectedIds((prev) => {
+      if (prev.has(selectedId)) return prev;
+      return new Set([selectedId]);
+    });
+    setAnchorId((prev) => prev ?? selectedId);
+  }, [selectedId]);
 
   const toggleColumn = useCallback((key: ColumnKey) => {
     setVisibleColumns(prev => {
@@ -209,10 +269,70 @@ export default function TrafficList({
 
   const sortedFlows = useMemo(() => sortFlows(flows, sort), [flows, sort]);
 
+  const handleRowSelect = useCallback((id: string, e?: React.MouseEvent) => {
+    const isToggle = Boolean(e && (e.metaKey || e.ctrlKey));
+    const isRange = Boolean(e && e.shiftKey);
+
+    if (isRange && anchorId) {
+      const ids = sortedFlows.map((flow) => flow.id);
+      const start = ids.indexOf(anchorId);
+      const end = ids.indexOf(id);
+      if (start !== -1 && end !== -1) {
+        const [from, to] = start < end ? [start, end] : [end, start];
+        const rangeIds = ids.slice(from, to + 1);
+        setSelectedIds(new Set(rangeIds));
+        onSelect(id);
+        return;
+      }
+    }
+
+    if (isToggle) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        if (selectedId) next.add(selectedId);
+        return next;
+      });
+      setAnchorId(id);
+      onSelect(id);
+      return;
+    }
+
+    setSelectedIds(new Set([id]));
+    setAnchorId(id);
+    onSelect(id);
+  }, [anchorId, onSelect, selectedId, sortedFlows]);
+
   const handleContextMenu = useCallback((e: React.MouseEvent, flow: HttpFlow) => {
     e.preventDefault();
+    setSelectedIds((prev) => {
+      if (prev.has(flow.id)) return prev;
+      return new Set([flow.id]);
+    });
+    onSelect(flow.id);
     setContextMenu({ x: e.clientX, y: e.clientY, flow });
-  }, []);
+  }, [onSelect]);
+
+  const handleBulkDelete = useCallback(async () => {
+    const ids = [...selectedIds];
+    if (ids.length === 0) return;
+
+    const failures: string[] = [];
+    for (const id of ids) {
+      const result = await deleteTrafficFlow(window.proxyboy, id);
+      if (result.success) {
+        removeFlow(id);
+      } else {
+        failures.push(result.error || id);
+      }
+    }
+
+    setSelectedIds(new Set());
+    if (failures.length > 0) {
+      window.alert(`Removed ${ids.length - failures.length} request(s). ${failures.length} could not be deleted (only completed requests can be removed).`);
+    }
+  }, [removeFlow, selectedIds]);
 
   const quickAddCaptureRule = useCallback(async (flow: HttpFlow, type: 'allow-list' | 'block-list') => {
     const api = (window as any).proxyboy;
@@ -265,7 +385,99 @@ export default function TrafficList({
     );
   }, []);
 
+  const createBreakpointForUrl = useCallback(async (flow: HttpFlow) => {
+    const api = (window as any).proxyboy;
+    if (!api?.rules) {
+      window.alert('Rule controls are unavailable.');
+      return;
+    }
+
+    const pattern = getExactUrlPattern(flow);
+    if (!pattern) {
+      window.alert('Could not derive a URL pattern from this request.');
+      return;
+    }
+
+    await api.rules.create({
+      type: 'breakpoint',
+      name: `Breakpoint ${pattern.label}`,
+      enabled: true,
+      matchCriteria: {
+        urlPattern: pattern.urlPattern,
+        isRegex: true,
+      },
+      breakOn: 'both',
+    });
+    await useRulesStore.getState().loadRules();
+    window.alert('Created a breakpoint rule for this URL.');
+  }, []);
+
+  const createMapRemoteForHost = useCallback(async (flow: HttpFlow) => {
+    const api = (window as any).proxyboy;
+    if (!api?.rules) {
+      window.alert('Rule controls are unavailable.');
+      return;
+    }
+
+    const pattern = getMapRemoteHostPattern(flow);
+    if (!pattern) {
+      window.alert('Could not derive a host pattern from this request.');
+      return;
+    }
+
+    const destination = window.prompt(
+      `Destination base URL for ${pattern.hostLabel} (path will be preserved):`,
+      pattern.origin,
+    );
+    if (!destination) return;
+
+    const normalizedDestination = destination.trim();
+    try {
+      const parsed = new URL(normalizedDestination);
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        window.alert('Destination URL must start with http:// or https://.');
+        return;
+      }
+    } catch {
+      window.alert('Enter a valid destination URL.');
+      return;
+    }
+
+    await api.rules.create({
+      type: 'map-remote',
+      name: `Map ${pattern.hostLabel}`,
+      enabled: true,
+      matchCriteria: {
+        urlPattern: pattern.urlPattern,
+        isRegex: false,
+      },
+      destinationUrl: normalizedDestination,
+      preservePath: true,
+    });
+    await useRulesStore.getState().loadRules();
+    window.alert(`Created a Map Remote rule for ${pattern.hostLabel}.`);
+  }, []);
+
   const buildMenuItems = useCallback((flow: HttpFlow): ContextMenuItem[] => {
+    if (selectedIds.size > 1 && selectedIds.has(flow.id)) {
+      const selectedFlows = sortedFlows.filter((item) => selectedIds.has(item.id));
+      return [
+        {
+          label: `Copy URLs (${selectedIds.size})`,
+          icon: '🔗',
+          onClick: () => {
+            const urls = selectedFlows.map((item) => item.request.url).join('\n');
+            void navigator.clipboard.writeText(urls);
+          },
+        },
+        {
+          label: `Delete selected (${selectedIds.size})`,
+          icon: '🗑',
+          onClick: () => { void handleBulkDelete(); },
+        },
+      ];
+    }
+
     const compareItems: ContextMenuItem[] = [];
 
     if (flow.response) {
@@ -305,6 +517,16 @@ export default function TrafficList({
         onClick: () => quickAddCaptureRule(flow, 'allow-list'),
       },
       {
+        label: 'Create breakpoint for this URL',
+        icon: '⏸',
+        onClick: () => { void createBreakpointForUrl(flow); },
+      },
+      {
+        label: 'Create Map Remote for this host',
+        icon: '🌐',
+        onClick: () => { void createMapRemoteForHost(flow); },
+      },
+      {
         label: 'Edit and Resend',
         icon: '✍️',
         onClick: () => onEditAndResend(flow),
@@ -323,6 +545,16 @@ export default function TrafficList({
         label: 'Copy as cURL',
         icon: '⌘',
         onClick: () => navigator.clipboard.writeText(flowToCurl(flow)),
+      },
+      {
+        label: 'Copy as Fetch',
+        icon: 'ƒ',
+        onClick: () => navigator.clipboard.writeText(flowToFetch(flow)),
+      },
+      {
+        label: 'Copy as PowerShell',
+        icon: '>_',
+        onClick: () => navigator.clipboard.writeText(flowToPowerShell(flow)),
       },
       {
         label: 'Copy URL',
@@ -353,14 +585,37 @@ export default function TrafficList({
         },
       },
     ];
-  }, [compareTargetFlowId, markedFlowId, onClearComparison, onCompareWithMarked, onEditAndResend, onMarkForCompare, quickAddCaptureRule]);
+  }, [
+    compareTargetFlowId,
+    createBreakpointForUrl,
+    createMapRemoteForHost,
+    handleBulkDelete,
+    markedFlowId,
+    onClearComparison,
+    onCompareWithMarked,
+    onEditAndResend,
+    onMarkForCompare,
+    quickAddCaptureRule,
+    selectedIds,
+    sortedFlows,
+  ]);
 
   if (flows.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center h-full text-pb-text-dim">
+      <div className="flex flex-col items-center justify-center h-full text-pb-text-dim px-6 text-center">
         <div className="text-4xl mb-4">📡</div>
-        <div className="text-lg font-medium">No traffic captured</div>
+        <div className="text-lg font-medium text-pb-text">No traffic captured</div>
         <div className="text-sm mt-1">Start the proxy and make some requests</div>
+        <div className="mt-4 max-w-md space-y-2 text-xs leading-relaxed">
+          <div className="rounded border border-pb-border bg-pb-surface px-3 py-2">
+            <span className="font-semibold text-pb-text">Proxy tip:</span>{' '}
+            Enable system proxy, or point clients to <span className="font-mono text-pb-info">127.0.0.1:9090</span>.
+          </div>
+          <div className="rounded border border-pb-border bg-pb-surface px-3 py-2">
+            <span className="font-semibold text-pb-text">Certificate tip:</span>{' '}
+            For HTTPS interception open <span className="text-pb-text">Settings → Install Certificate</span>.
+          </div>
+        </div>
       </div>
     );
   }
@@ -414,6 +669,25 @@ export default function TrafficList({
           )}
         </div>
       </div>
+      {selectedIds.size > 1 && (
+        <div className="flex items-center gap-3 h-8 px-3 bg-pb-accent/10 border-b border-pb-border text-xs text-pb-text">
+          <span className="font-medium">{selectedIds.size} selected</span>
+          <button
+            type="button"
+            onClick={() => { void handleBulkDelete(); }}
+            className="px-2 py-0.5 rounded bg-pb-error/15 text-pb-error hover:bg-pb-error/25 font-medium"
+          >
+            Bulk delete
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedIds(new Set())}
+            className="px-2 py-0.5 rounded text-pb-text-dim hover:text-pb-text"
+          >
+            Clear
+          </button>
+        </div>
+      )}
       {/* Rows */}
       <Virtuoso
         data={sortedFlows}
@@ -421,8 +695,8 @@ export default function TrafficList({
           <TrafficRow
             key={flow.id}
             flow={flow}
-            selected={flow.id === selectedId}
-            onSelect={onSelect}
+            selected={flow.id === selectedId || selectedIds.has(flow.id)}
+            onSelect={handleRowSelect}
             onContextMenu={handleContextMenu}
             visibleColumns={visibleColumns}
             colorMode={trafficRowColorMode}
