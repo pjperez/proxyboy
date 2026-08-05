@@ -1,0 +1,7 @@
+﻿{
+  "name": "lodash.get",
+  "version": "4.4.2",
+  "description": "Shim replacing deprecated lodash.get package",
+  "main": "index.js",
+  "license": "MIT"
+}
