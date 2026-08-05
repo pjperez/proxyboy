@@ -1,0 +1,7 @@
+﻿{
+  "name": "boolean",
+  "version": "3.2.0",
+  "description": "Shim replacing deprecated boolean package",
+  "main": "index.js",
+  "license": "MIT"
+}
