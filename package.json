@@ -1,13 +1,12 @@
 {
   "name": "proxyboy",
   "version": "1.0.0",
-  "description": "ProxyBoy — Agentic HTTP/HTTPS Debugging Proxy for Windows",
+  "description": "ProxyBoy - Agentic HTTP/HTTPS Debugging Proxy for Windows",
   "main": ".vite/build/index.js",
   "scripts": {
     "start": "electron-forge start",
     "build": "electron-forge make",
     "package": "electron-forge package",
-    "postinstall": "node scripts/patch-vscode-jsonrpc.js",
     "lint": "tsc --noEmit",
     "test": "vitest run"
   },
@@ -30,8 +29,6 @@
     "@github/copilot-sdk": "^0.1.32",
     "@monaco-editor/react": "^4.7.0",
     "@types/react-syntax-highlighter": "^15.5.13",
-    "chalk": "^5.6.2",
-    "commander": "^14.0.3",
     "electron-squirrel-startup": "^1.0.1",
     "http-mitm-proxy": "^1.1.0",
     "http-proxy-agent": "^7.0.2",
@@ -81,6 +78,20 @@
     "electron-winstaller": "^5.4.4",
     "boolean": "file:packages/shims/boolean",
     "lodash.get": "file:packages/shims/lodash.get",
-    "uuid": "^11.1.0"
+    "uuid": "^11.1.0",
+    "brace-expansion": "file:packages/vendor/brace-expansion",
+    "tmp": "0.2.7",
+    "fast-uri": "file:packages/vendor/fast-uri",
+    "dompurify": "^3.4.12",
+    "vscode-jsonrpc": "file:packages/vendor/vscode-jsonrpc"
+  },
+  "vitest": {
+    "exclude": [
+      "**/node_modules/**",
+      "**/dist/**",
+      "**/packages/**",
+      "**/cypress/**",
+      "**/.{idea,git,cache,output,temp}/**"
+    ]
   }
 }
