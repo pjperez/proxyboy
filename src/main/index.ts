@@ -4,6 +4,7 @@ import { ProxyEngine } from './proxy/engine';
 import { CertificateManager } from './proxy/certificate';
 import { registerIpcHandlers } from './ipc/handlers';
 import { initDatabase, closeDatabase, persistDatabase } from './storage/database';
+import { runRetentionPolicy } from './storage/queries';
 import { clearSystemProxy } from './utils/windows-proxy';
 import { DEFAULT_PROXY_PORT, DEFAULT_PROXY_HOST } from '../shared/constants';
 
@@ -77,6 +78,8 @@ declare const MAIN_WINDOW_VITE_NAME: string;
 app.whenReady().then(async () => {
   try {
     await initDatabase();
+    // Enforce the flow retention policy on startup so the DB never grows unbounded
+    try { runRetentionPolicy(); } catch (error) { console.error('Failed to apply retention policy:', error); }
     createWindow();
   } catch (error) {
     console.error('Failed to initialize application:', error);

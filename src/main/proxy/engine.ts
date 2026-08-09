@@ -5,6 +5,7 @@ import * as http from 'http';
 import * as https from 'https';
 import { randomUUID } from 'crypto';
 import { gunzipSync, inflateSync, brotliDecompressSync } from 'zlib';
+import { createBodyCapture, type BodyCapture } from './body-capture';
 import {
   BreakpointRequestEdits,
   BreakpointResponseEdits,
@@ -1174,6 +1175,7 @@ export class ProxyEngine extends EventEmitter {
 
       // Collect response
       const responseChunks: Buffer[] = [];
+      let bodyCapture: BodyCapture | null = null;
       let firstByteRecorded = false;
       let sseRemainder = '';
       let responseContentEncoding: string | undefined;
@@ -1266,17 +1268,18 @@ export class ProxyEngine extends EventEmitter {
               appendSseEvents: parsed.events,
             }, flow);
           }
-        } else {
+        } else if (responseScripts.length > 0 || shouldPauseResponse) {
           responseChunks.push(chunk);
-          if (responseScripts.length > 0 || shouldPauseResponse) {
-            callback(null, undefined as any);
-            return;
-          }
+          callback(null, undefined as any);
+          return;
+        } else {
+          bodyCapture ??= createBodyCapture(responseContentEncoding, chunk, MAX_BODY_SIZE);
+          bodyCapture.feed(chunk);
         }
         throttleController.scheduleDownloadChunk(chunk, callback);
       });
 
-      ctx.onResponseEnd((ctx: any, cb: () => void) => {
+      ctx.onResponseEnd(async (ctx: any, cb: () => void) => {
         const finalizeFlow = (finalResponse: HttpResponse) => {
           flow.response = finalResponse;
           flow.state = 'complete';
@@ -1307,13 +1310,24 @@ export class ProxyEngine extends EventEmitter {
           flow.streamOpen = false;
         }
 
-        const rawBody = responseChunks.length > 0 ? Buffer.concat(responseChunks) : undefined;
-        let responseBody = rawBody ? decompressBody(rawBody, responseContentEncoding) : undefined;
+        const rawBody = bodyCapture
+          ? undefined
+          : (responseChunks.length > 0 ? Buffer.concat(responseChunks) : undefined);
+        let responseBody: Buffer | undefined;
+        if (bodyCapture) {
+          // Streaming passthrough path — body already capped while capturing
+          responseBody = await bodyCapture.finish();
+          if (bodyCapture.truncated) {
+            flow.tags.push('body-truncated');
+          }
+        } else {
+          responseBody = rawBody ? decompressBody(rawBody, responseContentEncoding) : undefined;
 
-        // Body size cap (2 MB)
-        if (responseBody && responseBody.length > MAX_BODY_SIZE) {
-          responseBody = responseBody.subarray(0, MAX_BODY_SIZE);
-          flow.tags.push('body-truncated');
+          // Body size cap (2 MB)
+          if (responseBody && responseBody.length > MAX_BODY_SIZE) {
+            responseBody = responseBody.subarray(0, MAX_BODY_SIZE);
+            flow.tags.push('body-truncated');
+          }
         }
 
         const response: HttpResponse = {

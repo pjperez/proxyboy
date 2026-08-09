@@ -72,6 +72,11 @@ export const IPC_CHANNELS = {
   DNS_SET_SERVERS: 'dns:set-servers',
   DNS_CLEAR_CACHE: 'dns:clear-cache',
 
+  // Retention
+  RETENTION_GET: 'retention:get',
+  RETENTION_SET: 'retention:set',
+  RETENTION_PRUNE_NOW: 'retention:prune-now',
+
   // Sessions
   SESSION_LIST: 'session:list',
   SESSION_CREATE: 'session:create',

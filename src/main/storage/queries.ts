@@ -195,6 +195,85 @@ export function deleteFlow(id: string): void {
   schedulePersist();
 }
 
+export interface PruneOptions {
+  /** Delete flows beyond this many newest (0/null disables). */
+  maxCount?: number;
+  /** Delete flows older than this many milliseconds (0/null disables). */
+  maxAgeMs?: number;
+}
+
+/**
+ * Prune flows by age and/or count. Flows are removed from the flows table and
+ * cascade to their requests/responses. Returns the number of flows deleted.
+ */
+export function pruneFlows(options: PruneOptions): number {
+  const db = getDatabase();
+  const idsToDelete = new Set<string>();
+
+  if (options.maxAgeMs != null && options.maxAgeMs > 0) {
+    const cutoff = Date.now() - options.maxAgeMs;
+    const stmt = db.prepare('SELECT id FROM flows WHERE created_at < ?');
+    stmt.bind([cutoff]);
+    while (stmt.step()) {
+      const row = stmt.getAsObject();
+      if (typeof row.id === 'string') idsToDelete.add(row.id);
+    }
+    stmt.free();
+  }
+
+  if (options.maxCount != null && options.maxCount > 0) {
+    // Everything beyond the newest maxCount (LIMIT -1 = unbounded, OFFSET skips the kept rows)
+    const stmt = db.prepare('SELECT id FROM flows ORDER BY created_at DESC LIMIT -1 OFFSET ?');
+    stmt.bind([options.maxCount]);
+    while (stmt.step()) {
+      const row = stmt.getAsObject();
+      if (typeof row.id === 'string') idsToDelete.add(row.id);
+    }
+    stmt.free();
+  }
+
+  if (idsToDelete.size === 0) return 0;
+
+  const ids = [...idsToDelete];
+  const placeholders = ids.map(() => '?').join(',');
+  db.run(`DELETE FROM flows WHERE id IN (${placeholders})`, ids);
+  schedulePersist();
+  return ids.length;
+}
+
+export interface RetentionSettings {
+  maxFlows: number;
+  maxAgeDays: number;
+}
+
+const DEFAULT_RETENTION: RetentionSettings = { maxFlows: 10000, maxAgeDays: 30 };
+
+/** Read the user-configurable retention policy from app_settings. */
+export function getRetentionSettings(): RetentionSettings {
+  const rawMaxFlows = getAppSetting('retention_max_flows');
+  const rawMaxAgeDays = getAppSetting('retention_max_age_days');
+  const maxFlows = rawMaxFlows ? Number(rawMaxFlows) : DEFAULT_RETENTION.maxFlows;
+  const maxAgeDays = rawMaxAgeDays ? Number(rawMaxAgeDays) : DEFAULT_RETENTION.maxAgeDays;
+  return {
+    maxFlows: Number.isFinite(maxFlows) && maxFlows >= 0 ? maxFlows : DEFAULT_RETENTION.maxFlows,
+    maxAgeDays: Number.isFinite(maxAgeDays) && maxAgeDays >= 0 ? maxAgeDays : DEFAULT_RETENTION.maxAgeDays,
+  };
+}
+
+export function setRetentionSettings(settings: RetentionSettings): void {
+  setAppSetting('retention_max_flows', String(Math.max(0, Math.round(settings.maxFlows))));
+  setAppSetting('retention_max_age_days', String(Math.max(0, settings.maxAgeDays)));
+}
+
+/** Apply the configured retention policy now. Returns the number of flows deleted. */
+export function runRetentionPolicy(): number {
+  const { maxFlows, maxAgeDays } = getRetentionSettings();
+  return pruneFlows({
+    maxCount: maxFlows > 0 ? maxFlows : undefined,
+    maxAgeMs: maxAgeDays > 0 ? maxAgeDays * 24 * 60 * 60 * 1000 : undefined,
+  });
+}
+
 export function saveRule(rule: Rule): void {
   const db = getDatabase();
   db.run(

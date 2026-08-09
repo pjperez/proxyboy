@@ -5,6 +5,7 @@ import { app } from 'electron';
 
 let db: SqlJsDatabase | null = null;
 let dbPath: string = '';
+let dirty = false;
 
 function getWasmPath(): string {
   // In packaged app, the WASM file is in the app resources
@@ -36,11 +37,15 @@ export async function initDatabase(): Promise<void> {
     db = new SQL.Database(buffer);
   } else {
     db = new SQL.Database();
+    // Persist a freshly created database so the file exists on disk.
+    // Loading an existing file skips the initial write — migrations are
+    // idempotent and re-run every launch, so an unpersisted ALTER is harmless.
+    markDirty();
+    persistDatabase();
   }
 
   db.run('PRAGMA foreign_keys = ON;');
   initializeSchema(db);
-  persistDatabase();
 }
 
 export function getDatabase(): SqlJsDatabase {
@@ -51,15 +56,22 @@ export function getDatabase(): SqlJsDatabase {
 }
 
 export function persistDatabase(): void {
-  if (db && dbPath) {
+  if (db && dbPath && dirty) {
     const data = db.export();
     fs.writeFileSync(dbPath, Buffer.from(data));
+    dirty = false;
   }
 }
 
 let persistTimer: ReturnType<typeof setTimeout> | null = null;
 
+/** Mark the in-memory database as changed since the last persist. */
+export function markDirty(): void {
+  dirty = true;
+}
+
 export function schedulePersist(): void {
+  markDirty();
   if (persistTimer) return;
   persistTimer = setTimeout(() => {
     persistTimer = null;
@@ -165,9 +177,9 @@ function initializeSchema(database: SqlJsDatabase): void {
   database.run('CREATE INDEX IF NOT EXISTS idx_requests_method ON requests(method);');
   database.run('CREATE INDEX IF NOT EXISTS idx_responses_status_code ON responses(status_code);');
   database.run('CREATE INDEX IF NOT EXISTS idx_agent_messages_conversation ON agent_messages(conversation_id);');
-  database.run('CREATE INDEX IF NOT EXISTS idx_flows_session_id ON flows(session_id);');
   ensureColumn(database, 'flows', 'timing', 'TEXT');
   ensureColumn(database, 'flows', 'session_id', 'TEXT');
+  database.run('CREATE INDEX IF NOT EXISTS idx_flows_session_id ON flows(session_id);');
   ensureColumn(database, 'requests', 'body_encoding', "TEXT DEFAULT 'utf8'");
   ensureColumn(database, 'requests', 'graphql_operation_type', 'TEXT');
   ensureColumn(database, 'requests', 'graphql_operation_name', 'TEXT');

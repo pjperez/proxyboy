@@ -38,6 +38,9 @@ import {
   getActiveSessionId,
   setActiveSessionId,
   getFlowById,
+  getRetentionSettings,
+  setRetentionSettings,
+  runRetentionPolicy,
 } from '../storage/queries';
 import * as fs from 'fs';
 import type { Session } from '../../shared/types';
@@ -741,6 +744,34 @@ export function registerIpcHandlers(
     try {
       proxyEngine.getDnsResolver().clearCache();
       return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Retention
+  ipcMain.handle(IPC_CHANNELS.RETENTION_GET, () => {
+    try {
+      return { success: true, settings: getRetentionSettings() };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.RETENTION_SET, (_event, settings: { maxFlows: number; maxAgeDays: number }) => {
+    try {
+      setRetentionSettings({ maxFlows: settings.maxFlows, maxAgeDays: settings.maxAgeDays });
+      runRetentionPolicy();
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.RETENTION_PRUNE_NOW, () => {
+    try {
+      const deleted = runRetentionPolicy();
+      return { success: true, deleted };
     } catch (error: any) {
       return { success: false, error: error.message };
     }
