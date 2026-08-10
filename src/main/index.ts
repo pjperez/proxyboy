@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, session } from 'electron';
 import * as path from 'path';
 import { ProxyEngine } from './proxy/engine';
 import { CertificateManager } from './proxy/certificate';
@@ -27,6 +27,21 @@ let mainWindow: BrowserWindow | null = null;
 let proxyEngine: ProxyEngine | null = null;
 
 const createWindow = (): void => {
+  // Enforce a strict Content Security Policy to mitigate XSS risk in the renderer.
+  // 'unsafe-inline' for styles is needed because Vite injects style tags during HMR.
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          MAIN_WINDOW_VITE_DEV_SERVER_URL
+            ? "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss: http: https:"
+            : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss: http: https:",
+        ],
+      },
+    });
+  });
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
