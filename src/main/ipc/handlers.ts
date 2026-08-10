@@ -27,6 +27,7 @@ import {
   saveRule,
   getRules,
   getFlows as getStoredFlows,
+  getFlowsSummary as getStoredFlowsSummary,
   deleteRule as dbDeleteRule,
   deleteFlow as deleteStoredFlow,
   getAppSetting,
@@ -38,6 +39,11 @@ import {
   getActiveSessionId,
   setActiveSessionId,
   getFlowById,
+  getRetentionSettings,
+  setRetentionSettings,
+  runRetentionPolicy,
+  getGrpcHosts,
+  setGrpcHosts,
 } from '../storage/queries';
 import * as fs from 'fs';
 import type { Session } from '../../shared/types';
@@ -383,7 +389,7 @@ export function registerIpcHandlers(
   // Traffic
   ipcMain.handle(IPC_CHANNELS.TRAFFIC_GET_FLOWS, (_event) => {
     try {
-      const dbFlows = getStoredFlows(5000, 0, activeSessionId);
+      const dbFlows = getStoredFlowsSummary(5000, 0, activeSessionId);
       return dbFlows.map(sanitizeFlow);
     } catch (error: any) {
       return { success: false, error: error.message };
@@ -741,6 +747,62 @@ export function registerIpcHandlers(
     try {
       proxyEngine.getDnsResolver().clearCache();
       return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Retention
+  ipcMain.handle(IPC_CHANNELS.RETENTION_GET, () => {
+    try {
+      return { success: true, settings: getRetentionSettings() };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.RETENTION_SET, (_event, settings: { maxFlows: number; maxAgeDays: number }) => {
+    try {
+      setRetentionSettings({ maxFlows: settings.maxFlows, maxAgeDays: settings.maxAgeDays });
+      runRetentionPolicy();
+      return { success: true };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.RETENTION_PRUNE_NOW, () => {
+    try {
+      const deleted = runRetentionPolicy();
+      return { success: true, deleted };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // gRPC interception hosts
+  ipcMain.handle(IPC_CHANNELS.GRPC_GET_HOSTS, () => {
+    try {
+      return { success: true, hosts: getGrpcHosts() };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GRPC_SET_HOSTS, (_event, hosts: string[]) => {
+    try {
+      if (!Array.isArray(hosts)) {
+        return { success: false, error: 'hosts must be an array of strings' };
+      }
+      const cleaned = setGrpcHosts(hosts);
+      // Live-update the running engine so new CONNECTs honor the new list
+      // without requiring a proxy restart.
+      try {
+        proxyEngine?.setGrpcHosts(cleaned);
+      } catch {
+        // engine may not be running yet; settings are persisted for next start
+      }
+      return { success: true, hosts: cleaned };
     } catch (error: any) {
       return { success: false, error: error.message };
     }

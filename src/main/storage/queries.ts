@@ -94,7 +94,6 @@ function queryFlows(sql: string, params: any[] = []): HttpFlow[] {
 
 export function getFlows(limit = 1000, offset = 0, sessionId?: string): HttpFlow[] {
   const sessionFilter = sessionId ? 'AND f.session_id = ?' : '';
-  const params = sessionId ? [limit, offset, sessionId] : [limit, offset];
   // Place sessionId params before limit/offset in the WHERE clause
   const reorderedParams = sessionId ? [sessionId, limit, offset] : [limit, offset];
   return queryFlows(`
@@ -105,6 +104,33 @@ export function getFlows(limit = 1000, offset = 0, sessionId?: string): HttpFlow
            r.timestamp as req_timestamp,
            res.id as res_id, res.status_code, res.status_message,
            res.headers as res_headers, res.body as res_body, res.body_encoding as res_body_encoding, res.body_size as res_body_size,
+           res.timestamp as res_timestamp, res.duration
+    FROM flows f
+    JOIN requests r ON r.flow_id = f.id
+    LEFT JOIN responses res ON res.flow_id = f.id
+    WHERE 1=1 ${sessionFilter}
+    ORDER BY f.created_at DESC
+    LIMIT ? OFFSET ?
+  `, reorderedParams);
+}
+
+/**
+ * Lightweight list query that omits request/response bodies.
+ * The UI only needs metadata (method, url, status, size) for the flow list;
+ * bodies are loaded on demand via getFlowById() when a flow is selected.
+ * This avoids transferring potentially gigabytes of body data on each refresh.
+ */
+export function getFlowsSummary(limit = 1000, offset = 0, sessionId?: string): HttpFlow[] {
+  const sessionFilter = sessionId ? 'AND f.session_id = ?' : '';
+  const reorderedParams = sessionId ? [sessionId, limit, offset] : [limit, offset];
+  return queryFlows(`
+    SELECT f.id, f.state, f.tags, f.notes, f.created_at, f.timing,
+           r.id as req_id, r.method, r.url, r.protocol, r.host, r.path,
+           r.headers as req_headers, r.body_size as req_body_size,
+           r.graphql_operation_type as req_graphql_operation_type, r.graphql_operation_name as req_graphql_operation_name,
+           r.timestamp as req_timestamp,
+           res.id as res_id, res.status_code, res.status_message,
+           res.headers as res_headers, res.body_size as res_body_size,
            res.timestamp as res_timestamp, res.duration
     FROM flows f
     JOIN requests r ON r.flow_id = f.id
@@ -193,6 +219,116 @@ export function deleteFlow(id: string): void {
   const db = getDatabase();
   db.run('DELETE FROM flows WHERE id = ?', [id]);
   schedulePersist();
+}
+
+export interface PruneOptions {
+  /** Delete flows beyond this many newest (0/null disables). */
+  maxCount?: number;
+  /** Delete flows older than this many milliseconds (0/null disables). */
+  maxAgeMs?: number;
+}
+
+/**
+ * Prune flows by age and/or count. Flows are removed from the flows table and
+ * cascade to their requests/responses. Returns the number of flows deleted.
+ */
+export function pruneFlows(options: PruneOptions): number {
+  const db = getDatabase();
+  const idsToDelete = new Set<string>();
+
+  if (options.maxAgeMs != null && options.maxAgeMs > 0) {
+    const cutoff = Date.now() - options.maxAgeMs;
+    const stmt = db.prepare('SELECT id FROM flows WHERE created_at < ?');
+    stmt.bind([cutoff]);
+    while (stmt.step()) {
+      const row = stmt.getAsObject();
+      if (typeof row.id === 'string') idsToDelete.add(row.id);
+    }
+    stmt.free();
+  }
+
+  if (options.maxCount != null && options.maxCount > 0) {
+    // Everything beyond the newest maxCount (LIMIT -1 = unbounded, OFFSET skips the kept rows)
+    const stmt = db.prepare('SELECT id FROM flows ORDER BY created_at DESC LIMIT -1 OFFSET ?');
+    stmt.bind([options.maxCount]);
+    while (stmt.step()) {
+      const row = stmt.getAsObject();
+      if (typeof row.id === 'string') idsToDelete.add(row.id);
+    }
+    stmt.free();
+  }
+
+  if (idsToDelete.size === 0) return 0;
+
+  const ids = [...idsToDelete];
+  const placeholders = ids.map(() => '?').join(',');
+  db.run(`DELETE FROM flows WHERE id IN (${placeholders})`, ids);
+  schedulePersist();
+  return ids.length;
+}
+
+export interface RetentionSettings {
+  maxFlows: number;
+  maxAgeDays: number;
+}
+
+const DEFAULT_RETENTION: RetentionSettings = { maxFlows: 10000, maxAgeDays: 30 };
+
+/** Read the user-configurable retention policy from app_settings. */
+export function getRetentionSettings(): RetentionSettings {
+  const rawMaxFlows = getAppSetting('retention_max_flows');
+  const rawMaxAgeDays = getAppSetting('retention_max_age_days');
+  const maxFlows = rawMaxFlows ? Number(rawMaxFlows) : DEFAULT_RETENTION.maxFlows;
+  const maxAgeDays = rawMaxAgeDays ? Number(rawMaxAgeDays) : DEFAULT_RETENTION.maxAgeDays;
+  return {
+    maxFlows: Number.isFinite(maxFlows) && maxFlows >= 0 ? maxFlows : DEFAULT_RETENTION.maxFlows,
+    maxAgeDays: Number.isFinite(maxAgeDays) && maxAgeDays >= 0 ? maxAgeDays : DEFAULT_RETENTION.maxAgeDays,
+  };
+}
+
+export function setRetentionSettings(settings: RetentionSettings): void {
+  setAppSetting('retention_max_flows', String(Math.max(0, Math.round(settings.maxFlows))));
+  setAppSetting('retention_max_age_days', String(Math.max(0, settings.maxAgeDays)));
+}
+
+/** Apply the configured retention policy now. Returns the number of flows deleted. */
+export function runRetentionPolicy(): number {
+  const { maxFlows, maxAgeDays } = getRetentionSettings();
+  return pruneFlows({
+    maxCount: maxFlows > 0 ? maxFlows : undefined,
+    maxAgeMs: maxAgeDays > 0 ? maxAgeDays * 24 * 60 * 60 * 1000 : undefined,
+  });
+}
+
+/**
+ * Hosts whose CONNECT tunnels should be intercepted as HTTP/2 (gRPC) traffic.
+ * Stored as a JSON array in app_settings. Plain suffix match is applied at
+ * runtime (see ProxyEngine.isGrpcTarget). Empty array = gRPC interception off.
+ */
+export function getGrpcHosts(): string[] {
+  const raw = getAppSetting('grpc_hosts');
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((h) => (typeof h === 'string' ? h.trim().toLowerCase() : ''))
+      .filter((h) => h.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+export function setGrpcHosts(hosts: string[]): string[] {
+  const cleaned = Array.from(
+    new Set(
+      hosts
+        .map((h) => h.trim().toLowerCase())
+        .filter((h) => h.length > 0),
+    ),
+  ).sort();
+  setAppSetting('grpc_hosts', JSON.stringify(cleaned));
+  return cleaned;
 }
 
 export function saveRule(rule: Rule): void {

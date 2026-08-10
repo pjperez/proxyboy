@@ -1,9 +1,10 @@
-import { app, BrowserWindow } from 'electron';
+import { app, BrowserWindow, session } from 'electron';
 import * as path from 'path';
 import { ProxyEngine } from './proxy/engine';
 import { CertificateManager } from './proxy/certificate';
 import { registerIpcHandlers } from './ipc/handlers';
 import { initDatabase, closeDatabase, persistDatabase } from './storage/database';
+import { runRetentionPolicy, getGrpcHosts } from './storage/queries';
 import { clearSystemProxy } from './utils/windows-proxy';
 import { DEFAULT_PROXY_PORT, DEFAULT_PROXY_HOST } from '../shared/constants';
 
@@ -12,10 +13,35 @@ if (require('electron-squirrel-startup')) {
   app.quit();
 }
 
+// Crash resilience: log unexpected errors instead of taking down the entire
+// proxy process (and losing all captured traffic). User scripts, upstream
+// quirks, and library bugs should never kill the app silently.
+process.on('unhandledRejection', (reason) => {
+  console.error('[proxyboy] Unhandled promise rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[proxyboy] Uncaught exception:', err);
+});
+
 let mainWindow: BrowserWindow | null = null;
 let proxyEngine: ProxyEngine | null = null;
 
 const createWindow = (): void => {
+  // Enforce a strict Content Security Policy to mitigate XSS risk in the renderer.
+  // 'unsafe-inline' for styles is needed because Vite injects style tags during HMR.
+  session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          MAIN_WINDOW_VITE_DEV_SERVER_URL
+            ? "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss: http: https:"
+            : "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws: wss: http: https:",
+        ],
+      },
+    });
+  });
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -60,6 +86,7 @@ const createWindow = (): void => {
       port: DEFAULT_PROXY_PORT,
       host: DEFAULT_PROXY_HOST,
       enableSsl: true,
+      grpcHosts: getGrpcHosts(),
     },
     certManager,
   );
@@ -77,6 +104,8 @@ declare const MAIN_WINDOW_VITE_NAME: string;
 app.whenReady().then(async () => {
   try {
     await initDatabase();
+    // Enforce the flow retention policy on startup so the DB never grows unbounded
+    try { runRetentionPolicy(); } catch (error) { console.error('Failed to apply retention policy:', error); }
     createWindow();
   } catch (error) {
     console.error('Failed to initialize application:', error);

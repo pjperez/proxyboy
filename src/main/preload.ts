@@ -156,6 +156,20 @@ const api = {
     clearCache: () => ipcRenderer.invoke(IPC_CHANNELS.DNS_CLEAR_CACHE),
   },
 
+  // Retention
+  retention: {
+    get: () => ipcRenderer.invoke(IPC_CHANNELS.RETENTION_GET),
+    set: (settings: { maxFlows: number; maxAgeDays: number }) =>
+      ipcRenderer.invoke(IPC_CHANNELS.RETENTION_SET, settings),
+    pruneNow: () => ipcRenderer.invoke(IPC_CHANNELS.RETENTION_PRUNE_NOW),
+  },
+
+  // gRPC / HTTP-2 interception
+  grpc: {
+    getHosts: () => ipcRenderer.invoke(IPC_CHANNELS.GRPC_GET_HOSTS),
+    setHosts: (hosts: string[]) => ipcRenderer.invoke(IPC_CHANNELS.GRPC_SET_HOSTS, hosts),
+  },
+
   // Sessions
   sessions: {
     list: (): Promise<Session[]> => ipcRenderer.invoke(IPC_CHANNELS.SESSION_LIST),
