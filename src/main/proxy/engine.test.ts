@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { gzipSync, deflateSync, brotliCompressSync } from 'zlib';
 import type { HttpRequest, HttpResponse } from '../../shared/types';
 import {
   applyBreakpointRequestEdits,
   applyBreakpointResponseEdits,
   applyPreparedRequestScriptResult,
+  decompressBody,
   encodeBreakpointBody,
   hasBreakpointResponseChanges,
   prepareBreakpointRequestForForwarding,
@@ -201,5 +203,61 @@ describe('breakpoint response editing helpers', () => {
     expect(edited.headers['transfer-encoding']).toBeUndefined();
     expect(edited.headers['content-length']).toBe(String(Buffer.byteLength('{"ok":false}')));
     expect(edited.bodySize).toBe(Buffer.byteLength('{"ok":false}'));
+  });
+});
+
+describe('decompressBody (async, off-event-loop)', () => {
+  const payload = Buffer.from('Hello ProxyBoy! '.repeat(100), 'utf8');
+
+  it('decompresses gzip using explicit content-encoding', async () => {
+    const compressed = gzipSync(payload);
+    const result = await decompressBody(compressed, 'gzip');
+    expect(result.equals(payload)).toBe(true);
+  });
+
+  it('decompresses brotli using explicit content-encoding', async () => {
+    const compressed = brotliCompressSync(payload);
+    const result = await decompressBody(compressed, 'br');
+    expect(result.equals(payload)).toBe(true);
+  });
+
+  it('decompresses deflate using explicit content-encoding', async () => {
+    const compressed = deflateSync(payload);
+    const result = await decompressBody(compressed, 'deflate');
+    expect(result.equals(payload)).toBe(true);
+  });
+
+  it('auto-detects gzip by magic bytes when encoding is missing', async () => {
+    const compressed = gzipSync(payload);
+    const result = await decompressBody(compressed);
+    expect(result.equals(payload)).toBe(true);
+  });
+
+  it('auto-detects deflate by magic bytes when encoding header is stripped', async () => {
+    const compressed = deflateSync(payload);
+    const result = await decompressBody(compressed);
+    expect(result.equals(payload)).toBe(true);
+  });
+
+  it('returns plain bodies unchanged', async () => {
+    const result = await decompressBody(payload);
+    expect(result.equals(payload)).toBe(true);
+  });
+
+  it('handles array-form content-encoding header', async () => {
+    const compressed = gzipSync(payload);
+    const result = await decompressBody(compressed, ['gzip']);
+    expect(result.equals(payload)).toBe(true);
+  });
+
+  it('returns original body when declared encoding fails and bytes are not recognized', async () => {
+    const result = await decompressBody(payload, 'gzip');
+    // payload is not actually gzip; magic bytes do not match either → passthrough
+    expect(result.equals(payload)).toBe(true);
+  });
+
+  it('returns original body for empty input', async () => {
+    const result = await decompressBody(Buffer.alloc(0), 'gzip');
+    expect(result.length).toBe(0);
   });
 });

@@ -4,7 +4,8 @@ import type { IProxy } from 'http-mitm-proxy';
 import * as http from 'http';
 import * as https from 'https';
 import { randomUUID } from 'crypto';
-import { gunzipSync, inflateSync, brotliDecompressSync } from 'zlib';
+import { gunzip, inflate, brotliDecompress } from 'zlib';
+import { promisify } from 'util';
 import { createBodyCapture, type BodyCapture } from './body-capture';
 import { GrpcProxy, type GrpcCertProvider, type GrpcFlowSink } from './grpc-proxy';
 import type { GrpcMessage } from './grpc-frames';
@@ -57,31 +58,41 @@ import {
 const MAX_FLOWS = 10000;
 const MAX_BODY_SIZE = 2 * 1024 * 1024; // 2 MB
 
-function decompressBody(body: Buffer, encoding?: string | string[]): Buffer {
+const gunzipAsync = promisify(gunzip);
+const inflateAsync = promisify(inflate);
+const brotliDecompressAsync = promisify(brotliDecompress);
+
+/**
+ * Decompress a response body off the main event loop. Uses the async zlib
+ * APIs so the actual CPU work runs on the libuv thread pool rather than
+ * blocking proxy traffic and the UI.
+ *
+ * Falls back to magic-byte auto-detection when the content-encoding is
+ * missing or stripped (e.g. by an upstream proxy).
+ */
+export async function decompressBody(body: Buffer, encoding?: string | string[]): Promise<Buffer> {
   // Try explicit content-encoding first
   if (encoding) {
     const enc = Array.isArray(encoding) ? encoding[0] : encoding;
-    if (!enc) {
-      return body;
-    }
-
-    const normalizedEncoding = enc.toLowerCase().trim();
-    try {
-      if (normalizedEncoding === 'gzip' || normalizedEncoding === 'x-gzip') return gunzipSync(body);
-      if (normalizedEncoding === 'br') return brotliDecompressSync(body);
-      if (normalizedEncoding === 'deflate') return inflateSync(body);
-    } catch {
-      // Fall through to magic-byte detection
+    if (enc) {
+      const normalizedEncoding = enc.toLowerCase().trim();
+      try {
+        if (normalizedEncoding === 'gzip' || normalizedEncoding === 'x-gzip') return await gunzipAsync(body);
+        if (normalizedEncoding === 'br') return await brotliDecompressAsync(body);
+        if (normalizedEncoding === 'deflate') return await inflateAsync(body);
+      } catch {
+        // Fall through to magic-byte detection
+      }
     }
   }
   // Auto-detect by magic bytes (handles missing/stripped content-encoding)
   if (body.length >= 2) {
     if (body[0] === 0x1f && body[1] === 0x8b) {
-      try { return gunzipSync(body); } catch { /* not gzip */ }
+      try { return await gunzipAsync(body); } catch { /* not gzip */ }
     }
     // Deflate (zlib header: 0x78 0x01/9C/DA)
     if (body[0] === 0x78 && (body[1] === 0x01 || body[1] === 0x9c || body[1] === 0xda)) {
-      try { return inflateSync(body); } catch { /* not deflate */ }
+      try { return await inflateAsync(body); } catch { /* not deflate */ }
     }
   }
   return body;
@@ -1352,7 +1363,7 @@ export class ProxyEngine extends EventEmitter {
             flow.tags.push('body-truncated');
           }
         } else {
-          responseBody = rawBody ? decompressBody(rawBody, responseContentEncoding) : undefined;
+          responseBody = rawBody ? await decompressBody(rawBody, responseContentEncoding) : undefined;
 
           // Body size cap (2 MB)
           if (responseBody && responseBody.length > MAX_BODY_SIZE) {
