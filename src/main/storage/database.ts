@@ -179,6 +179,11 @@ function initializeSchema(database: SqlJsDatabase): void {
   database.run('CREATE INDEX IF NOT EXISTS idx_agent_messages_conversation ON agent_messages(conversation_id);');
   ensureColumn(database, 'flows', 'timing', 'TEXT');
   ensureColumn(database, 'flows', 'session_id', 'TEXT');
+  // Composite index covers both session-filtered and unfiltered flows queries,
+  // both of which filter by session_id and order by created_at DESC.
+  database.run('CREATE INDEX IF NOT EXISTS idx_flows_session_created ON flows(session_id, created_at);');
+  // Standalone created_at index speeds up the default getFlows() ordering.
+  database.run('CREATE INDEX IF NOT EXISTS idx_flows_created_at ON flows(created_at);');
   database.run('CREATE INDEX IF NOT EXISTS idx_flows_session_id ON flows(session_id);');
   ensureColumn(database, 'requests', 'body_encoding', "TEXT DEFAULT 'utf8'");
   ensureColumn(database, 'requests', 'graphql_operation_type', 'TEXT');
