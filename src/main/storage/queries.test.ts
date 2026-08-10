@@ -32,6 +32,8 @@ import {
   getGrpcHosts,
   setGrpcHosts,
   saveFlow,
+  getFlows,
+  getFlowsSummary,
 } from './queries';
 import type { HttpFlow } from '../../shared/types';
 
@@ -225,5 +227,35 @@ describe('persistence efficiency', () => {
     saveFlow(makeFlow('f-dirty', Date.now()));
     await database.closeDatabase(); // persists because data changed
     expect(writeFileCalls.count).toBe(1);
+  });
+});
+
+describe('getFlowsSummary', () => {
+  it('returns flows without bodies for efficient list rendering', async () => {
+    await freshDb('summary');
+
+    // Save a flow WITH a body
+    const flow = makeFlow('f-body', Date.now());
+    flow.request.body = '{"hello":"world"}';
+    flow.response!.body = '{"ok":true}';
+    saveFlow(flow);
+
+    // Full query includes bodies
+    const full = getFlows(100, 0);
+    expect(full).toHaveLength(1);
+    expect(full[0].request.body).toBeDefined();
+    expect(full[0].response?.body).toBeDefined();
+
+    // Summary query omits bodies
+    const summary = getFlowsSummary(100, 0);
+    expect(summary).toHaveLength(1);
+    expect(summary[0].request.method).toBe('GET');
+    expect(summary[0].request.url).toBe('https://example.com/f-body');
+    expect(summary[0].response?.statusCode).toBe(200);
+    expect(summary[0].request.body).toBeUndefined();
+    expect(summary[0].response?.body).toBeUndefined();
+    // Metadata preserved
+    expect(summary[0].request.bodySize).toBe(0);
+    expect(summary[0].response?.bodySize).toBe(0);
   });
 });

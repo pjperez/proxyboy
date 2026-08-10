@@ -76,6 +76,8 @@ function MainApp() {
   const [agentWidth, setAgentWidth] = useState(384);
   const [selectedFlowId, setSelectedFlowId] = useState<string | null>(null);
   const [selectedHost, setSelectedHost] = useState<string | null>(null);
+  // Full flow with body for the detail view; loaded on demand when a flow is selected.
+  const [detailedFlow, setDetailedFlow] = useState<HttpFlow | null>(null);
 
   const handleAgentResize = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -236,19 +238,45 @@ function MainApp() {
     () => markedFlowId ? flows.find((flow) => flow.id === markedFlowId) ?? null : null,
     [flows, markedFlowId],
   );
+  // Full marked flow (with body) for comparison; loaded on demand.
+  const [detailedMarkedFlow, setDetailedMarkedFlow] = useState<HttpFlow | null>(null);
+  useEffect(() => {
+    if (!markedFlowId) {
+      setDetailedMarkedFlow(null);
+      return;
+    }
+    let cancelled = false;
+    window.proxyboy?.traffic.getFlow(markedFlowId).then((full: HttpFlow | null) => {
+      if (!cancelled && full) setDetailedMarkedFlow(full);
+    });
+    return () => { cancelled = true; };
+  }, [markedFlowId]);
   const comparisonFlow = useMemo(() => {
     if (!selectedFlow || compareTargetFlowId !== selectedFlow.id || !markedFlow || markedFlow.id === selectedFlow.id) {
       return null;
     }
 
-    return markedFlow;
-  }, [compareTargetFlowId, markedFlow, selectedFlow]);
+    return detailedMarkedFlow ?? markedFlow;
+  }, [compareTargetFlowId, detailedMarkedFlow, markedFlow, selectedFlow]);
 
   useEffect(() => {
     if (selectedFlowId && !flows.some((flow) => flow.id === selectedFlowId)) {
       setSelectedFlowId(null);
     }
   }, [flows, selectedFlowId]);
+
+  // Load the full flow (with body) for the detail view whenever the selection changes.
+  useEffect(() => {
+    if (!selectedFlowId) {
+      setDetailedFlow(null);
+      return;
+    }
+    let cancelled = false;
+    window.proxyboy?.traffic.getFlow(selectedFlowId).then((full: HttpFlow | null) => {
+      if (!cancelled && full) setDetailedFlow(full);
+    });
+    return () => { cancelled = true; };
+  }, [selectedFlowId]);
 
   useEffect(() => {
     if (
@@ -318,11 +346,17 @@ function MainApp() {
     }
 
     try {
-      await navigator.clipboard.writeText(flowToCurl(selectedFlow));
+      // Use detailedFlow (with body) if available; otherwise fetch on demand.
+      let flow = detailedFlow ?? selectedFlow;
+      if (flow.request.body === undefined) {
+        const full = await window.proxyboy?.traffic.getFlow(selectedFlow.id);
+        if (full) flow = full;
+      }
+      await navigator.clipboard.writeText(flowToCurl(flow));
     } catch {
       showActionError('Failed to copy the selected request as cURL.');
     }
-  }, [selectedFlow, selectedView, showActionError]);
+  }, [detailedFlow, selectedFlow, selectedView, showActionError]);
 
   const handleToggleDetail = useCallback(() => {
     if (selectedView !== 'traffic') {
@@ -603,7 +637,7 @@ function MainApp() {
                   <div className="w-1/2 overflow-hidden">
                     <TrafficDetail
                       key={selectedFlow.id}
-                      flow={selectedFlow}
+                      flow={detailedFlow ?? selectedFlow}
                       comparisonFlow={comparisonFlow}
                       onClearComparison={clearComparison}
                       onClose={() => setSelectedFlowId(null)}

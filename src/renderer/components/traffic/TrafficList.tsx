@@ -529,7 +529,14 @@ export default function TrafficList({
       {
         label: 'Edit and Resend',
         icon: '✍️',
-        onClick: () => onEditAndResend(flow),
+        onClick: async () => {
+          let f = flow;
+          if (f.request.body === undefined && flow.id) {
+            const full = await window.proxyboy?.traffic.getFlow(flow.id);
+            if (full) f = full;
+          }
+          onEditAndResend(f);
+        },
       },
       {
         label: 'Repeat Request',
@@ -544,17 +551,38 @@ export default function TrafficList({
       {
         label: 'Copy as cURL',
         icon: '⌘',
-        onClick: () => navigator.clipboard.writeText(flowToCurl(flow)),
+        onClick: async () => {
+          let f = flow;
+          if (f.request.body === undefined && flow.id) {
+            const full = await window.proxyboy?.traffic.getFlow(flow.id);
+            if (full) f = full;
+          }
+          navigator.clipboard.writeText(flowToCurl(f));
+        },
       },
       {
         label: 'Copy as Fetch',
         icon: 'ƒ',
-        onClick: () => navigator.clipboard.writeText(flowToFetch(flow)),
+        onClick: async () => {
+          let f = flow;
+          if (f.request.body === undefined && flow.id) {
+            const full = await window.proxyboy?.traffic.getFlow(flow.id);
+            if (full) f = full;
+          }
+          navigator.clipboard.writeText(flowToFetch(f));
+        },
       },
       {
         label: 'Copy as PowerShell',
         icon: '>_',
-        onClick: () => navigator.clipboard.writeText(flowToPowerShell(flow)),
+        onClick: async () => {
+          let f = flow;
+          if (f.request.body === undefined && flow.id) {
+            const full = await window.proxyboy?.traffic.getFlow(flow.id);
+            if (full) f = full;
+          }
+          navigator.clipboard.writeText(flowToPowerShell(f));
+        },
       },
       {
         label: 'Copy URL',
@@ -564,8 +592,12 @@ export default function TrafficList({
       {
         label: 'Copy Response Body',
         icon: '📋',
-        onClick: () => {
-          const body = flow.response?.body;
+        onClick: async () => {
+          let body = flow.response?.body;
+          if (body === undefined && flow.id) {
+            const full = await window.proxyboy?.traffic.getFlow(flow.id);
+            body = full?.response?.body;
+          }
           const text = typeof body === 'string' ? body : body ? String(body) : '';
           navigator.clipboard.writeText(text);
         },

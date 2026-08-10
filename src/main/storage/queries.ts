@@ -94,7 +94,6 @@ function queryFlows(sql: string, params: any[] = []): HttpFlow[] {
 
 export function getFlows(limit = 1000, offset = 0, sessionId?: string): HttpFlow[] {
   const sessionFilter = sessionId ? 'AND f.session_id = ?' : '';
-  const params = sessionId ? [limit, offset, sessionId] : [limit, offset];
   // Place sessionId params before limit/offset in the WHERE clause
   const reorderedParams = sessionId ? [sessionId, limit, offset] : [limit, offset];
   return queryFlows(`
@@ -105,6 +104,33 @@ export function getFlows(limit = 1000, offset = 0, sessionId?: string): HttpFlow
            r.timestamp as req_timestamp,
            res.id as res_id, res.status_code, res.status_message,
            res.headers as res_headers, res.body as res_body, res.body_encoding as res_body_encoding, res.body_size as res_body_size,
+           res.timestamp as res_timestamp, res.duration
+    FROM flows f
+    JOIN requests r ON r.flow_id = f.id
+    LEFT JOIN responses res ON res.flow_id = f.id
+    WHERE 1=1 ${sessionFilter}
+    ORDER BY f.created_at DESC
+    LIMIT ? OFFSET ?
+  `, reorderedParams);
+}
+
+/**
+ * Lightweight list query that omits request/response bodies.
+ * The UI only needs metadata (method, url, status, size) for the flow list;
+ * bodies are loaded on demand via getFlowById() when a flow is selected.
+ * This avoids transferring potentially gigabytes of body data on each refresh.
+ */
+export function getFlowsSummary(limit = 1000, offset = 0, sessionId?: string): HttpFlow[] {
+  const sessionFilter = sessionId ? 'AND f.session_id = ?' : '';
+  const reorderedParams = sessionId ? [sessionId, limit, offset] : [limit, offset];
+  return queryFlows(`
+    SELECT f.id, f.state, f.tags, f.notes, f.created_at, f.timing,
+           r.id as req_id, r.method, r.url, r.protocol, r.host, r.path,
+           r.headers as req_headers, r.body_size as req_body_size,
+           r.graphql_operation_type as req_graphql_operation_type, r.graphql_operation_name as req_graphql_operation_name,
+           r.timestamp as req_timestamp,
+           res.id as res_id, res.status_code, res.status_message,
+           res.headers as res_headers, res.body_size as res_body_size,
            res.timestamp as res_timestamp, res.duration
     FROM flows f
     JOIN requests r ON r.flow_id = f.id

@@ -27,6 +27,7 @@ import {
   saveRule,
   getRules,
   getFlows as getStoredFlows,
+  getFlowsSummary as getStoredFlowsSummary,
   deleteRule as dbDeleteRule,
   deleteFlow as deleteStoredFlow,
   getAppSetting,
@@ -388,7 +389,7 @@ export function registerIpcHandlers(
   // Traffic
   ipcMain.handle(IPC_CHANNELS.TRAFFIC_GET_FLOWS, (_event) => {
     try {
-      const dbFlows = getStoredFlows(5000, 0, activeSessionId);
+      const dbFlows = getStoredFlowsSummary(5000, 0, activeSessionId);
       return dbFlows.map(sanitizeFlow);
     } catch (error: any) {
       return { success: false, error: error.message };
