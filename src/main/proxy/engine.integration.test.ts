@@ -82,6 +82,33 @@ function requestThroughProxy(
   });
 }
 
+function postThroughProxy(
+  proxyPort: number,
+  originPort: number,
+  proxyPath: string,
+  body: Buffer,
+): Promise<{ statusCode: number; body: Buffer }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request({
+      host: '127.0.0.1',
+      port: proxyPort,
+      method: 'POST',
+      path: proxyPath,
+      headers: {
+        Host: `127.0.0.1:${originPort}`,
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(body.length),
+      },
+    }, (res) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => resolve({ statusCode: res.statusCode ?? 0, body: Buffer.concat(chunks) }));
+    });
+    req.on('error', reject);
+    req.end(body);
+  });
+}
+
 function waitForFlowComplete(engine: ProxyEngine): Promise<HttpFlow> {
   return new Promise((resolve) => {
     engine.once('flow:complete', (flow: HttpFlow) => resolve(flow));
@@ -145,5 +172,33 @@ describe('ProxyEngine integration', () => {
     expect(flow.response?.body?.length).toBe(2 * 1024 * 1024);
     expect(flow.response?.bodySize).toBe(2 * 1024 * 1024);
     expect(flow.tags).toContain('body-truncated');
+  });
+
+  it('caps request bodies over 2 MB and tags them request-body-truncated while forwarding the full body', async () => {
+    const { engine, port } = await startProxy();
+    const largeUpload = Buffer.alloc(3 * 1024 * 1024, 0x62); // 3 MB
+
+    const origin = await startOrigin((req, res) => {
+      const chunks: Buffer[] = [];
+      req.on('data', (c) => chunks.push(c));
+      req.on('end', () => {
+        const received = Buffer.concat(chunks);
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end(`received ${received.length} bytes`);
+      });
+    });
+
+    const flowPromise = waitForFlowComplete(engine);
+    const client = await postThroughProxy(port, origin.port, '/upload', largeUpload);
+    const flow = await flowPromise;
+
+    // Origin receives the full untruncated upload
+    expect(client.statusCode).toBe(200);
+    expect(client.body.toString()).toContain('received 3145728 bytes');
+
+    // Captured request body is capped at 2 MB and tagged
+    expect(flow.request.body?.length).toBe(2 * 1024 * 1024);
+    expect(flow.request.bodySize).toBe(2 * 1024 * 1024);
+    expect(flow.tags).toContain('request-body-truncated');
   });
 });

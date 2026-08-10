@@ -873,6 +873,8 @@ export class ProxyEngine extends EventEmitter {
       const flowId = randomUUID();
       ctx.proxyboyFlowId = flowId;
       const chunks: Buffer[] = [];
+      let bufferedRequestBytes = 0;
+      let requestBodyTruncated = false;
       const startTime = Date.now();
       const replayed = Boolean(ctx.clientToProxyRequest.headers[INTERNAL_REPLAY_HEADER]);
       const composerRequestIdHeader = ctx.clientToProxyRequest.headers[INTERNAL_COMPOSER_HEADER];
@@ -1068,9 +1070,19 @@ export class ProxyEngine extends EventEmitter {
         done();
       };
 
-      // Collect request body
+      // Collect request body (capped at MAX_BODY_SIZE to avoid OOM on large uploads)
       ctx.onRequestData((ctx: any, chunk: Buffer, callback: (err: null, chunk: Buffer) => void) => {
-        chunks.push(chunk);
+        if (!requestBodyTruncated && bufferedRequestBytes < MAX_BODY_SIZE) {
+          const remaining = MAX_BODY_SIZE - bufferedRequestBytes;
+          if (chunk.length <= remaining) {
+            chunks.push(chunk);
+            bufferedRequestBytes += chunk.length;
+          } else {
+            chunks.push(chunk.subarray(0, remaining));
+            bufferedRequestBytes = MAX_BODY_SIZE;
+            requestBodyTruncated = true;
+          }
+        }
         if (requestScripts.length > 0 || shouldPauseRequest) {
           callback(null, undefined as any);
           return;
@@ -1089,6 +1101,9 @@ export class ProxyEngine extends EventEmitter {
           const body = Buffer.concat(chunks);
           flow.request.body = body;
           flow.request.bodySize = body.length;
+        }
+        if (requestBodyTruncated) {
+          flow.tags.push('request-body-truncated');
         }
 
         if (requestScripts.length === 0 && !shouldPauseRequest) {
@@ -1217,6 +1232,8 @@ export class ProxyEngine extends EventEmitter {
 
       // Collect response
       const responseChunks: Buffer[] = [];
+      let responseBodyBytes = 0;
+      let responseBodyTruncated = false;
       let bodyCapture: BodyCapture | null = null;
       let firstByteRecorded = false;
       let sseRemainder = '';
@@ -1311,7 +1328,17 @@ export class ProxyEngine extends EventEmitter {
             }, flow);
           }
         } else if (responseScripts.length > 0 || shouldPauseResponse) {
-          responseChunks.push(chunk);
+          if (!responseBodyTruncated && responseBodyBytes < MAX_BODY_SIZE) {
+            const remaining = MAX_BODY_SIZE - responseBodyBytes;
+            if (chunk.length <= remaining) {
+              responseChunks.push(chunk);
+              responseBodyBytes += chunk.length;
+            } else {
+              responseChunks.push(chunk.subarray(0, remaining));
+              responseBodyBytes = MAX_BODY_SIZE;
+              responseBodyTruncated = true;
+            }
+          }
           callback(null, undefined as any);
           return;
         } else {
@@ -1365,7 +1392,12 @@ export class ProxyEngine extends EventEmitter {
         } else {
           responseBody = rawBody ? await decompressBody(rawBody, responseContentEncoding) : undefined;
 
-          // Body size cap (2 MB)
+          // Tag if we stopped accumulating during streaming (scripting/breakpoint path)
+          if (responseBodyTruncated) {
+            flow.tags.push('body-truncated');
+          }
+
+          // Body size cap (2 MB) — secondary guard for decompressed bodies
           if (responseBody && responseBody.length > MAX_BODY_SIZE) {
             responseBody = responseBody.subarray(0, MAX_BODY_SIZE);
             flow.tags.push('body-truncated');
