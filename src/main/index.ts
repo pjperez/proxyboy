@@ -13,6 +13,16 @@ if (require('electron-squirrel-startup')) {
   app.quit();
 }
 
+// Crash resilience: log unexpected errors instead of taking down the entire
+// proxy process (and losing all captured traffic). User scripts, upstream
+// quirks, and library bugs should never kill the app silently.
+process.on('unhandledRejection', (reason) => {
+  console.error('[proxyboy] Unhandled promise rejection:', reason);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[proxyboy] Uncaught exception:', err);
+});
+
 let mainWindow: BrowserWindow | null = null;
 let proxyEngine: ProxyEngine | null = null;
 

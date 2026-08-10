@@ -65,6 +65,10 @@ export class GrpcProxy {
   private readonly server: http2.Http2SecureServer;
   private readonly upstreamSessions = new Map<string, UpstreamSession>();
   private readonly certContexts = new Map<string, Promise<tls.SecureContext>>();
+  /** Periodic sweep that closes idle upstream sessions to avoid leaks. */
+  private readonly reapTimer: NodeJS.Timeout;
+  private static readonly IDLE_SESSION_TTL_MS = 5 * 60 * 1000; // 5 minutes
+  private static readonly REAP_INTERVAL_MS = 60 * 1000; // check every minute
 
   constructor(private readonly options: GrpcProxyOptions) {
     this.server = http2.createSecureServer({
@@ -84,6 +88,9 @@ export class GrpcProxy {
       });
     });
     this.server.on('error', (err) => this.logError('h2 server error', err));
+
+    this.reapTimer = setInterval(() => this.reapIdleSessions(), GrpcProxy.REAP_INTERVAL_MS);
+    this.reapTimer.unref?.();
   }
 
   /** Feed a raw CONNECT-tunnel socket into the h2 TLS terminator. */
@@ -92,7 +99,24 @@ export class GrpcProxy {
     (this.server as unknown as { emit: (event: string, socket: Socket) => boolean }).emit('connection', socket);
   }
 
+  /** Close upstream sessions that have been idle longer than the TTL. */
+  private reapIdleSessions(): void {
+    const now = Date.now();
+    for (const [authority, entry] of this.upstreamSessions) {
+      if (now - entry.lastUsed < GrpcProxy.IDLE_SESSION_TTL_MS) continue;
+      const refCount = (entry.session as unknown as { openStreams?: number }).openStreams ?? 0;
+      if (refCount > 0) continue; // still in use; leave alone
+      try {
+        entry.session.close();
+      } catch {
+        /* ignore */
+      }
+      this.upstreamSessions.delete(authority);
+    }
+  }
+
   async close(): Promise<void> {
+    clearInterval(this.reapTimer);
     for (const entry of this.upstreamSessions.values()) {
       try {
         entry.session.close();
