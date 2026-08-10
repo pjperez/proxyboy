@@ -518,6 +518,21 @@ export class ProxyEngine extends EventEmitter {
     this.options.port = port;
   }
 
+  /**
+   * Update the set of hosts whose CONNECT tunnels should be intercepted as
+   * HTTP/2 (gRPC) traffic. Applied live to new CONNECT requests; does not
+   * disturb already-connected gRPC tunnels.
+   */
+  setGrpcHosts(hosts: string[]): void {
+    this.options.grpcHosts = hosts
+      .map((h) => (typeof h === 'string' ? h.trim().toLowerCase() : ''))
+      .filter((h) => h.length > 0);
+  }
+
+  getGrpcHosts(): string[] {
+    return Array.isArray(this.options.grpcHosts) ? [...this.options.grpcHosts] : [];
+  }
+
   getFlows(): HttpFlow[] {
     return Array.from(this.flows.values());
   }

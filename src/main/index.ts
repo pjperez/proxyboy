@@ -4,7 +4,7 @@ import { ProxyEngine } from './proxy/engine';
 import { CertificateManager } from './proxy/certificate';
 import { registerIpcHandlers } from './ipc/handlers';
 import { initDatabase, closeDatabase, persistDatabase } from './storage/database';
-import { runRetentionPolicy } from './storage/queries';
+import { runRetentionPolicy, getGrpcHosts } from './storage/queries';
 import { clearSystemProxy } from './utils/windows-proxy';
 import { DEFAULT_PROXY_PORT, DEFAULT_PROXY_HOST } from '../shared/constants';
 
@@ -61,6 +61,7 @@ const createWindow = (): void => {
       port: DEFAULT_PROXY_PORT,
       host: DEFAULT_PROXY_HOST,
       enableSsl: true,
+      grpcHosts: getGrpcHosts(),
     },
     certManager,
   );

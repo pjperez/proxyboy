@@ -41,6 +41,8 @@ import {
   getRetentionSettings,
   setRetentionSettings,
   runRetentionPolicy,
+  getGrpcHosts,
+  setGrpcHosts,
 } from '../storage/queries';
 import * as fs from 'fs';
 import type { Session } from '../../shared/types';
@@ -772,6 +774,34 @@ export function registerIpcHandlers(
     try {
       const deleted = runRetentionPolicy();
       return { success: true, deleted };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // gRPC interception hosts
+  ipcMain.handle(IPC_CHANNELS.GRPC_GET_HOSTS, () => {
+    try {
+      return { success: true, hosts: getGrpcHosts() };
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle(IPC_CHANNELS.GRPC_SET_HOSTS, (_event, hosts: string[]) => {
+    try {
+      if (!Array.isArray(hosts)) {
+        return { success: false, error: 'hosts must be an array of strings' };
+      }
+      const cleaned = setGrpcHosts(hosts);
+      // Live-update the running engine so new CONNECTs honor the new list
+      // without requiring a proxy restart.
+      try {
+        proxyEngine?.setGrpcHosts(cleaned);
+      } catch {
+        // engine may not be running yet; settings are persisted for next start
+      }
+      return { success: true, hosts: cleaned };
     } catch (error: any) {
       return { success: false, error: error.message };
     }

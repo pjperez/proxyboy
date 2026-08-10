@@ -274,6 +274,37 @@ export function runRetentionPolicy(): number {
   });
 }
 
+/**
+ * Hosts whose CONNECT tunnels should be intercepted as HTTP/2 (gRPC) traffic.
+ * Stored as a JSON array in app_settings. Plain suffix match is applied at
+ * runtime (see ProxyEngine.isGrpcTarget). Empty array = gRPC interception off.
+ */
+export function getGrpcHosts(): string[] {
+  const raw = getAppSetting('grpc_hosts');
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((h) => (typeof h === 'string' ? h.trim().toLowerCase() : ''))
+      .filter((h) => h.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+export function setGrpcHosts(hosts: string[]): string[] {
+  const cleaned = Array.from(
+    new Set(
+      hosts
+        .map((h) => h.trim().toLowerCase())
+        .filter((h) => h.length > 0),
+    ),
+  ).sort();
+  setAppSetting('grpc_hosts', JSON.stringify(cleaned));
+  return cleaned;
+}
+
 export function saveRule(rule: Rule): void {
   const db = getDatabase();
   db.run(

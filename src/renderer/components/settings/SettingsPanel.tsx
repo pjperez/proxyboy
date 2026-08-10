@@ -49,6 +49,9 @@ export default function SettingsPanel() {
   const [protobufPathsDraft, setProtobufPathsDraft] = useState('');
   const [protobufApplied, setProtobufApplied] = useState(false);
   const [protobufError, setProtobufError] = useState<string | null>(null);
+  const [grpcHostsDraft, setGrpcHostsDraft] = useState('');
+  const [grpcApplied, setGrpcApplied] = useState(false);
+  const [grpcError, setGrpcError] = useState<string | null>(null);
 
   useEffect(() => {
     window.proxyboy?.proxy.getCertStatus().then((status: { installed: boolean }) => {
@@ -71,6 +74,11 @@ export default function SettingsPanel() {
 
     window.proxyboy?.protobuf.getConfig().then((config: { protoFilePaths: string[] }) => {
       setProtobufPathsDraft(config.protoFilePaths.join('\n'));
+    }).catch(() => {});
+
+    // Load gRPC interception hosts
+    window.proxyboy?.grpc.getHosts().then((res: { hosts: string[] }) => {
+      setGrpcHostsDraft(res.hosts.join('\n'));
     }).catch(() => {});
   }, []);
 
@@ -242,6 +250,25 @@ export default function SettingsPanel() {
 
     setProtobufApplied(false);
     setProtobufError(result?.error || 'Failed to update the configured .proto files.');
+  };
+
+  const handleApplyGrpcHosts = async () => {
+    const hosts = grpcHostsDraft
+      .split(/\r?\n|,/)
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+
+    const result = await window.proxyboy?.grpc.setHosts(hosts);
+    if (result?.success) {
+      setGrpcHostsDraft((result.hosts as string[]).join('\n'));
+      setGrpcApplied(true);
+      setGrpcError(null);
+      setTimeout(() => setGrpcApplied(false), 2000);
+      return;
+    }
+
+    setGrpcApplied(false);
+    setGrpcError(result?.error || 'Failed to update gRPC interception hosts.');
   };
 
   const resolvedTheme = resolveThemePreference(theme);
@@ -632,6 +659,38 @@ export default function SettingsPanel() {
               Used to decode gRPC and protobuf bodies in the traffic detail view. Without a matching schema, ProxyBoy falls back to raw field numbers.
             </span>
             {protobufError && <span className="text-xs text-pb-error">{protobufError}</span>}
+          </div>
+        </Row>
+      </Section>
+
+      <Section title="gRPC Interception">
+        <Row label="Intercepted hosts">
+          <div className="flex flex-col items-end gap-2">
+            <textarea
+              value={grpcHostsDraft}
+              onChange={(event) => {
+                setGrpcHostsDraft(event.target.value);
+                setGrpcApplied(false);
+                setGrpcError(null);
+              }}
+              rows={4}
+              placeholder={'grpc.example.com\napi.grpcbin.com'}
+              className="bg-pb-bg border border-pb-border rounded px-3 py-2 text-sm text-pb-text font-mono w-80
+                focus:outline-none focus:border-pb-accent resize-y"
+            />
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleApplyGrpcHosts}
+                className="px-3 py-1.5 rounded text-sm font-medium bg-pb-accent text-pb-bg hover:bg-pb-accent/80"
+              >
+                Apply
+              </button>
+              {grpcApplied && <span className="text-xs text-pb-success">✓</span>}
+            </div>
+            <span className="max-w-md text-right text-xs text-pb-text-dim">
+              Hosts listed here are intercepted as HTTP/2 and decoded as gRPC (one host per line, comma-separated supported). Requires the ProxyBoy CA to be trusted. Empty list disables gRPC interception.
+            </span>
+            {grpcError && <span className="text-xs text-pb-error">{grpcError}</span>}
           </div>
         </Row>
       </Section>

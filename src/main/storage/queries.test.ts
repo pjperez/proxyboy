@@ -29,6 +29,8 @@ import {
   runRetentionPolicy,
   getRetentionSettings,
   setRetentionSettings,
+  getGrpcHosts,
+  setGrpcHosts,
   saveFlow,
 } from './queries';
 import type { HttpFlow } from '../../shared/types';
@@ -153,6 +155,47 @@ describe('runRetentionPolicy', () => {
 
     expect(runRetentionPolicy()).toBe(1);
     expect(flowIds()).toEqual(['f2']);
+  });
+});
+
+describe('grpc hosts', () => {
+  it('defaults to an empty list when nothing is configured', async () => {
+    await freshDb('grpc-default');
+    expect(getGrpcHosts()).toEqual([]);
+  });
+
+  it('round-trips a configured host list', async () => {
+    await freshDb('grpc-roundtrip');
+    setGrpcHosts(['grpc.example.com', 'api.grpcbin.com']);
+    expect(getGrpcHosts()).toEqual(['api.grpcbin.com', 'grpc.example.com']);
+  });
+
+  it('trims, lowercases, dedupes and sorts hosts', async () => {
+    await freshDb('grpc-normalize');
+    const cleaned = setGrpcHosts([
+      '  Grpc.Example.COM  ',
+      'grpc.example.com',
+      'second.example.com',
+      '',
+      '   ',
+    ]);
+    expect(cleaned).toEqual(['grpc.example.com', 'second.example.com']);
+    expect(getGrpcHosts()).toEqual(['grpc.example.com', 'second.example.com']);
+  });
+
+  it('returns an empty list when stored value is corrupt JSON', async () => {
+    await freshDb('grpc-corrupt');
+    // Write a malformed value directly through the underlying app-settings key.
+    const { setAppSetting } = await import('./queries');
+    setAppSetting('grpc_hosts', '{not json');
+    expect(getGrpcHosts()).toEqual([]);
+  });
+
+  it('returns an empty list when stored value is a non-array JSON', async () => {
+    await freshDb('grpc-nonarray');
+    const { setAppSetting } = await import('./queries');
+    setAppSetting('grpc_hosts', '"grpc.example.com"');
+    expect(getGrpcHosts()).toEqual([]);
   });
 });
 
