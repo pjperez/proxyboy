@@ -6,6 +6,8 @@ import * as https from 'https';
 import { randomUUID } from 'crypto';
 import { gunzipSync, inflateSync, brotliDecompressSync } from 'zlib';
 import { createBodyCapture, type BodyCapture } from './body-capture';
+import { GrpcProxy, type GrpcCertProvider, type GrpcFlowSink } from './grpc-proxy';
+import type { GrpcMessage } from './grpc-frames';
 import {
   BreakpointRequestEdits,
   BreakpointResponseEdits,
@@ -450,6 +452,7 @@ export class ProxyEngine extends EventEmitter {
   private upstreamProxySettings: UpstreamProxySettings;
   private directAgents: UpstreamProxyAgents;
   private upstreamAgents: UpstreamProxyAgents | null;
+  private grpcProxy: GrpcProxy | null = null;
 
   constructor(options: ProxyEngineOptions, certManager: CertificateManager) {
     super();
@@ -805,6 +808,19 @@ export class ProxyEngine extends EventEmitter {
         this.flows.set(flow.id, flow);
         this.emit('flow:complete', flow);
       }
+    });
+
+    this.proxy.onConnect((req: http.IncomingMessage, socket: any, _head: any, callback: () => void) => {
+      // CONNECT target is "host:port". Intercept only when the host matches the
+      // gRPC allowlist; otherwise defer to http-mitm-proxy's default tunnel.
+      const target = req.url || '';
+      const host = target.split(':')[0].toLowerCase();
+      if (host && this.isGrpcTarget(host)) {
+        this.handleGrpcConnect(socket as import('net').Socket);
+        // Intentionally do NOT call callback(): we own the socket now.
+        return;
+      }
+      callback();
     });
 
     this.proxy.onRequest((ctx: any, callback: () => void) => {
@@ -1543,6 +1559,98 @@ export class ProxyEngine extends EventEmitter {
       });
   }
 
+  private isGrpcTarget(host: string): boolean {
+    const hosts = this.options.grpcHosts;
+    if (!hosts || hosts.length === 0) return false;
+    return hosts.some((entry) => {
+      const h = entry.toLowerCase().trim();
+      if (!h) return false;
+      return host === h || host.endsWith('.' + h);
+    });
+  }
+
+  private ensureGrpcProxy(): GrpcProxy | null {
+    if (this.grpcProxy) return this.grpcProxy;
+    if (!this.options.grpcHosts || this.options.grpcHosts.length === 0) return null;
+    this.grpcProxy = new GrpcProxy({
+      certProvider: this.createGrpcCertProvider(),
+      sink: this.createGrpcFlowSink(),
+    });
+    return this.grpcProxy;
+  }
+
+  private handleGrpcConnect(socket: import('net').Socket): void {
+    const proxy = this.ensureGrpcProxy();
+    if (!proxy) {
+      socket.destroy();
+      return;
+    }
+    try {
+      proxy.handleTunnel(socket);
+    } catch (err) {
+      this.emit('proxy:error', err instanceof Error ? err : new Error(String(err)));
+      socket.destroy();
+    }
+  }
+
+  private createGrpcCertProvider(): GrpcCertProvider {
+    return async (hostname: string) => {
+      const ca = (this.proxy as unknown as { ca?: { generateServerCertificateKeys?: (...args: unknown[]) => void } }).ca;
+      if (!ca || typeof ca.generateServerCertificateKeys !== 'function') {
+        throw new Error('CA not initialized; start the proxy first.');
+      }
+      return await new Promise<{ cert: Buffer; key: Buffer }>((resolve, reject) => {
+        ca.generateServerCertificateKeys!(hostname, (certPem: string, keyPem: string) => {
+          if (!certPem || !keyPem) {
+            reject(new Error(`Failed to generate leaf cert for ${hostname}`));
+            return;
+          }
+          resolve({ cert: Buffer.from(certPem), key: Buffer.from(keyPem) });
+        });
+      });
+    };
+  }
+
+  private createGrpcFlowSink(): GrpcFlowSink {
+    const toSummary = (m: GrpcMessage) => ({
+      direction: m.direction,
+      compressed: m.compressed,
+      data: m.data.toString('base64'),
+      timestamp: m.timestamp,
+      ...(m.truncated ? { truncated: true } : {}),
+    });
+    return {
+      onFlowStart: (flow) => {
+        this.flows.set(flow.id, flow);
+        if (this.flows.size > MAX_FLOWS) {
+          const deleteCount = Math.floor(MAX_FLOWS * 0.2);
+          const keys = [...this.flows.keys()].slice(0, deleteCount);
+          for (const k of keys) this.flows.delete(k);
+        }
+        this.emit('flow:start', flow);
+      },
+      onFlowUpdate: (flow, append) => {
+        const existing = this.flows.get(flow.id);
+        if (existing) {
+          existing.grpcMessages = [...(existing.grpcMessages ?? []), ...append.map(toSummary)];
+          flow.grpcMessages = existing.grpcMessages;
+        } else {
+          flow.grpcMessages = append.map(toSummary);
+        }
+        this.flows.set(flow.id, flow);
+        const update: TrafficFlowUpdate = {
+          id: flow.id,
+          replaceGrpcMessages: flow.grpcMessages,
+        };
+        this.emit('flow:response', update);
+      },
+      onFlowComplete: (flow) => {
+        this.flows.set(flow.id, flow);
+        this.emit('flow:complete', flow);
+      },
+    };
+  }
+
   async start(): Promise<void> {
     if (this.running) return;
 
@@ -1576,6 +1684,14 @@ export class ProxyEngine extends EventEmitter {
   async stop(): Promise<void> {
     if (!this.running) return;
     this.interceptor.clearPausedFlows();
+    if (this.grpcProxy) {
+      try {
+        await this.grpcProxy.close();
+      } catch {
+        /* ignore */
+      }
+      this.grpcProxy = null;
+    }
     this.proxy.close();
     this.running = false;
     if (this.origStdoutWrite) {

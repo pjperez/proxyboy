@@ -66,20 +66,34 @@ export interface HttpFlow {
   composerRequestId?: string;
   createdAt: number;
   timing?: FlowTiming;
-  streamKind?: 'websocket' | 'sse';
+  streamKind?: 'websocket' | 'sse' | 'grpc';
   streamOpen?: boolean;
   websocketFrames?: WebSocketFrame[];
   sseEvents?: SseEvent[];
+  /** Captured gRPC messages (only when streamKind === 'grpc'). */
+  grpcMessages?: GrpcMessageSummary[];
+}
+
+export interface GrpcMessageSummary {
+  direction: 'request' | 'response';
+  compressed: boolean;
+  data: string; // base64-encoded payload (already capped)
+  timestamp: number;
+  truncated?: boolean;
 }
 
 export interface TrafficFlowUpdate {
   id: string;
-  streamKind?: 'websocket' | 'sse';
+  streamKind?: 'websocket' | 'sse' | 'grpc';
   streamOpen?: boolean;
   tags?: string[];
   notes?: string;
   appendWebSocketFrames?: WebSocketFrame[];
   appendSseEvents?: SseEvent[];
+  /** Replace the full gRPC message list (simplest sync model for bidirectional streams). */
+  replaceGrpcMessages?: GrpcMessageSummary[];
+  grpcStatus?: string;
+  grpcMessage?: string;
 }
 
 export interface FlowTiming {

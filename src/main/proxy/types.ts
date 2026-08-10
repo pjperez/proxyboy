@@ -7,6 +7,12 @@ export interface ProxyEngineOptions {
   sslCaDir?: string;
   enableSsl: boolean;
   upstreamProxySettings?: UpstreamProxySettings;
+  /**
+   * Hosts whose CONNECT tunnels should be handled as HTTP/2 (gRPC) traffic.
+   * Plain suffix match (e.g. "grpc.example.com" matches "api.grpc.example.com").
+   * Empty (default) disables gRPC interception.
+   */
+  grpcHosts?: string[];
 }
 
 export interface ProxyEvents {
