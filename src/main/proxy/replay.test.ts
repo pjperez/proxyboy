@@ -13,6 +13,7 @@ describe('replay helpers', () => {
       new URL('https://api.example.com/users?page=2'),
       true,
       12,
+      'secret-token',
     );
 
     expect(headers).toEqual({
@@ -20,6 +21,7 @@ describe('replay helpers', () => {
       Host: 'api.example.com',
       Connection: 'close',
       'x-proxyboy-replay': '1',
+      'x-proxyboy-internal-token': 'secret-token',
       'Content-Length': '12',
     });
   });
@@ -50,6 +52,7 @@ describe('replay helpers', () => {
       false,
       0,
       'composer-123',
+      'secret-token',
     );
 
     expect(headers).toEqual({
@@ -57,6 +60,7 @@ describe('replay helpers', () => {
       Host: 'api.example.com',
       Connection: 'close',
       'x-proxyboy-composer-id': 'composer-123',
+      'x-proxyboy-internal-token': 'secret-token',
     });
   });
 });

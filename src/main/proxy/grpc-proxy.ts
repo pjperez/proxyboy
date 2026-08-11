@@ -22,8 +22,11 @@ export interface GrpcFlowSink {
 export interface GrpcProxyOptions {
   certProvider: GrpcCertProvider;
   sink: GrpcFlowSink;
-  /** Upstream TLS options. Default lenient (rejectUnauthorized: false). */
-  upstreamTlsOptions?: tls.SecureContextOptions;
+  /**
+   * Upstream TLS options. Certificate verification is ON by default; pass
+   * `{ rejectUnauthorized: false }` explicitly to trust self-signed upstreams.
+   */
+  upstreamTlsOptions?: tls.ConnectionOptions;
   /** Max retained gRPC messages per direction per flow. */
   maxMessages?: number;
   /** Max bytes per individual gRPC message payload. */
@@ -69,6 +72,8 @@ export class GrpcProxy {
   private readonly reapTimer: NodeJS.Timeout;
   private static readonly IDLE_SESSION_TTL_MS = 5 * 60 * 1000; // 5 minutes
   private static readonly REAP_INTERVAL_MS = 60 * 1000; // check every minute
+  /** Bound on cached SNI certificate contexts; prevents unbounded memory growth. */
+  private static readonly MAX_CERT_CONTEXTS = 256;
 
   constructor(private readonly options: GrpcProxyOptions) {
     this.server = http2.createSecureServer({
@@ -143,6 +148,13 @@ export class GrpcProxy {
           this.certContexts.delete(servername);
           throw err;
         });
+      // Evict the oldest cached context once the cap is reached (Map iteration
+      // order is insertion order, so the first key is the oldest).
+      while (this.certContexts.size >= GrpcProxy.MAX_CERT_CONTEXTS) {
+        const oldest = this.certContexts.keys().next().value;
+        if (typeof oldest === 'undefined') break;
+        this.certContexts.delete(oldest);
+      }
       this.certContexts.set(servername, pending);
     }
     pending.then((ctx) => cb(null, ctx)).catch((err) => cb(err));
@@ -156,7 +168,7 @@ export class GrpcProxy {
     }
 
     const session = http2.connect(authority, {
-      rejectUnauthorized: false,
+      rejectUnauthorized: this.options.upstreamTlsOptions?.rejectUnauthorized ?? true,
       ...this.options.upstreamTlsOptions,
     });
     session.on('error', (err) => {

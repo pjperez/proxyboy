@@ -1,4 +1,4 @@
-import { ipcMain, BrowserWindow, dialog, app, safeStorage } from 'electron';
+import { ipcMain, BrowserWindow, dialog, app, safeStorage, type WebContents, type IpcMainInvokeEvent } from 'electron';
 import * as path from 'path';
 import { IPC_CHANNELS } from '../../shared/constants';
 import { ProxyEngine, encodeBreakpointBody } from '../proxy/engine';
@@ -6,7 +6,7 @@ import { CertificateManager } from '../proxy/certificate';
 import { AgentClient } from '../agent/client';
 import { replayFlowThroughProxy, sendComposedRequestThroughProxy } from '../proxy/replay';
 import { setSystemProxy, clearSystemProxy, isSystemProxyEnabled } from '../utils/windows-proxy';
-import { BreakpointPauseMessage, BreakpointResumeMessage, ProxyState, Rule, HttpFlow, CaptureFilterMode, ComposerRequest, ScriptRule, ScriptTestResult, TrafficFlowUpdate } from '../../shared/types';
+import { BreakpointPauseMessage, BreakpointResumeMessage, ProxyState, Rule, HttpFlow, CaptureFilterMode, ComposerRequest, ScriptRule, ScriptTestResult, TrafficFlowUpdate, BreakpointRule, MapLocalRule, MapRemoteRule, MatchCriteria } from '../../shared/types';
 import { normalizeThrottleSettings, type ThrottleSettings } from '../../shared/throttle';
 import { normalizeUpstreamProxySettings, type UpstreamProxySettings } from '../../shared/upstream-proxy';
 import { UpdateManager } from '../updater';
@@ -140,6 +140,173 @@ function resolveUpstreamProxySettingsForSave(
   return normalizedSettings;
 }
 const PROTOBUF_SETTINGS_KEY = 'protobuf:settings';
+const MAX_PROTO_FILE_PATHS = 100;
+
+// Only allow .proto files that exist as regular files on disk. This prevents a
+// compromised renderer from pointing fs.watch/protobuf.load at arbitrary paths.
+async function validateProtoFilePaths(protoFilePaths: string[]): Promise<void> {
+  if (protoFilePaths.length > MAX_PROTO_FILE_PATHS) {
+    throw new Error(`Invalid protobuf settings: at most ${MAX_PROTO_FILE_PATHS} .proto files are allowed`);
+  }
+  for (const filePath of protoFilePaths) {
+    if (!path.isAbsolute(filePath)) {
+      throw new Error(`Invalid protobuf settings: "${filePath}" is not an absolute path`);
+    }
+    if (!filePath.toLowerCase().endsWith('.proto')) {
+      throw new Error(`Invalid protobuf settings: "${filePath}" is not a .proto file`);
+    }
+    try {
+      const stat = fs.statSync(filePath);
+      if (!stat.isFile()) {
+        throw new Error(`Invalid protobuf settings: "${filePath}" is not a file`);
+      }
+    } catch (error: any) {
+      if (error.message?.startsWith('Invalid protobuf settings')) {
+        throw error;
+      }
+      throw new Error(`Invalid protobuf settings: "${filePath}" does not exist`);
+    }
+  }
+}
+
+const VALID_RULE_TYPES = new Set<Rule['type']>(['breakpoint', 'map-local', 'map-remote', 'allow-list', 'block-list', 'script']);
+const VALID_SCRIPT_PHASES = new Set<ScriptRule['phase']>(['request', 'response', 'both']);
+const VALID_BREAK_ON = new Set<BreakpointRule['breakOn']>(['request', 'response', 'both']);
+const MAX_RULE_NAME_LENGTH = 200;
+const MAX_URL_PATTERN_LENGTH = 4096;
+const MAX_LOCAL_FILE_PATH_LENGTH = 4096;
+const MAX_DESTINATION_URL_LENGTH = 4096;
+const MAX_SCRIPT_CODE_LENGTH = 500_000;
+const MAX_METHODS = 32;
+
+function assertString(value: unknown, field: string, maxLength: number): string {
+  if (typeof value !== 'string') {
+    throw new Error(`Invalid rule: ${field} must be a string`);
+  }
+  if (value.length > maxLength) {
+    throw new Error(`Invalid rule: ${field} exceeds ${maxLength} characters`);
+  }
+  return value;
+}
+
+function assertBoolean(value: unknown, field: string): boolean {
+  if (typeof value !== 'boolean') {
+    throw new Error(`Invalid rule: ${field} must be a boolean`);
+  }
+  return value;
+}
+
+function validateMatchCriteria(value: unknown): MatchCriteria {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error('Invalid rule: matchCriteria must be an object');
+  }
+  const criteria = value as Record<string, unknown>;
+  const urlPattern = assertString(criteria.urlPattern, 'matchCriteria.urlPattern', MAX_URL_PATTERN_LENGTH);
+  if (!urlPattern) {
+    throw new Error('Invalid rule: matchCriteria.urlPattern is required');
+  }
+  const isRegex = criteria.isRegex === undefined ? false : assertBoolean(criteria.isRegex, 'matchCriteria.isRegex');
+  let methods: string[] | undefined;
+  if (criteria.methods !== undefined) {
+    if (!Array.isArray(criteria.methods) || criteria.methods.length > MAX_METHODS) {
+      throw new Error(`Invalid rule: matchCriteria.methods must be an array of at most ${MAX_METHODS} items`);
+    }
+    methods = criteria.methods.map((m) => assertString(m, 'matchCriteria.methods[]', 32).toUpperCase());
+  }
+  return { urlPattern, isRegex, methods };
+}
+
+type SanitizedRule = Omit<BreakpointRule, 'id' | 'createdAt' | 'updatedAt'>
+  | Omit<MapLocalRule, 'id' | 'createdAt' | 'updatedAt'>
+  | Omit<MapRemoteRule, 'id' | 'createdAt' | 'updatedAt'>
+  | Omit<ScriptRule, 'id' | 'createdAt' | 'updatedAt'>
+  | (Omit<Rule, 'id' | 'createdAt' | 'updatedAt' | 'type'> & { type: 'allow-list' | 'block-list' });
+
+/**
+ * Sanitizes a rule payload received over IPC into a whitelisted shape.
+ * Throws on invalid input; never trusts field values from the renderer.
+ */
+function sanitizeRulePayload(raw: unknown): SanitizedRule {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error('Invalid rule: expected an object');
+  }
+  const data = raw as Record<string, unknown>;
+
+  if (typeof data.type !== 'string' || !VALID_RULE_TYPES.has(data.type as Rule['type'])) {
+    throw new Error(`Invalid rule: unknown type "${String(data.type)}"`);
+  }
+  const type = data.type as Rule['type'];
+  const name = assertString(data.name, 'name', MAX_RULE_NAME_LENGTH);
+  if (!name) throw new Error('Invalid rule: name is required');
+  const enabled = assertBoolean(data.enabled, 'enabled');
+  const matchCriteria = validateMatchCriteria(data.matchCriteria);
+
+  switch (type) {
+    case 'breakpoint': {
+      const breakOn = data.breakOn;
+      if (typeof breakOn !== 'string' || !VALID_BREAK_ON.has(breakOn as BreakpointRule['breakOn'])) {
+        throw new Error('Invalid breakpoint rule: breakOn must be "request", "response", or "both"');
+      }
+      return { type, name, enabled, matchCriteria, breakOn: breakOn as BreakpointRule['breakOn'] };
+    }
+    case 'map-local': {
+      const localFilePath = assertString(data.localFilePath, 'localFilePath', MAX_LOCAL_FILE_PATH_LENGTH);
+      if (!localFilePath) throw new Error('Invalid map-local rule: localFilePath is required');
+      const rule: Omit<MapLocalRule, 'id' | 'createdAt' | 'updatedAt'> = { type, name, enabled, matchCriteria, localFilePath };
+      if (data.statusCode !== undefined) {
+        if (typeof data.statusCode !== 'number' || !Number.isInteger(data.statusCode) || data.statusCode < 100 || data.statusCode > 999) {
+          throw new Error('Invalid map-local rule: statusCode must be an integer between 100 and 999');
+        }
+        rule.statusCode = data.statusCode;
+      }
+      if (data.responseHeaders !== undefined) {
+        if (typeof data.responseHeaders !== 'object' || data.responseHeaders === null || Array.isArray(data.responseHeaders)) {
+          throw new Error('Invalid map-local rule: responseHeaders must be an object');
+        }
+        rule.responseHeaders = Object.fromEntries(
+          Object.entries(data.responseHeaders).map(([k, v]) => [
+            String(k).slice(0, 128),
+            typeof v === 'string' ? v.slice(0, 4096) : JSON.stringify(v).slice(0, 4096),
+          ]),
+        );
+      }
+      return rule;
+    }
+    case 'map-remote': {
+      const destinationUrl = assertString(data.destinationUrl, 'destinationUrl', MAX_DESTINATION_URL_LENGTH);
+      let normalizedDestination = destinationUrl;
+      try {
+        const parsed = new URL(destinationUrl);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+          throw new Error('Invalid map-remote rule: destinationUrl must use http:// or https://');
+        }
+        normalizedDestination = parsed.toString();
+      } catch (error: any) {
+        if (error.message?.startsWith('Invalid map-remote')) throw error;
+        throw new Error('Invalid map-remote rule: destinationUrl is not a valid URL');
+      }
+      return {
+        type,
+        name,
+        enabled,
+        matchCriteria,
+        destinationUrl: normalizedDestination,
+        preservePath: data.preservePath === undefined ? true : assertBoolean(data.preservePath, 'preservePath'),
+      };
+    }
+    case 'script': {
+      const phase = data.phase;
+      if (typeof phase !== 'string' || !VALID_SCRIPT_PHASES.has(phase as ScriptRule['phase'])) {
+        throw new Error('Invalid script rule: phase must be "request", "response", or "both"');
+      }
+      const code = assertString(data.code, 'code', MAX_SCRIPT_CODE_LENGTH);
+      return { type, name, enabled, matchCriteria, phase: phase as ScriptRule['phase'], code };
+    }
+    case 'allow-list':
+    case 'block-list':
+      return { type, name, enabled, matchCriteria };
+  }
+}
 
 export function registerIpcHandlers(
   mainWindow: BrowserWindow,
@@ -150,6 +317,21 @@ export function registerIpcHandlers(
   const updateManager = new UpdateManager('pjperez/proxyboy', getAppSetting(AUTO_UPDATE_ENABLED_KEY) !== 'false');
   let protobufSettings: ProtobufSettings = DEFAULT_PROTOBUF_SETTINGS;
   let pendingFlowUpdates = new Map<string, TrafficFlowUpdate>();
+
+  // Only windows we created may invoke IPC handlers. Any other webContents
+  // (devtools, an unexpected window, or a compromised renderer) is rejected.
+  const trustedSenders = new WeakSet<WebContents>();
+  trustedSenders.add(mainWindow.webContents);
+
+  const handleTrusted = (channel: string, handler: (event: IpcMainInvokeEvent, ...args: any[]) => unknown) => {
+    ipcMain.handle(channel, (event, ...args) => {
+      if (!trustedSenders.has(event.sender)) {
+        console.warn(`[ipc] Rejected IPC from untrusted sender on channel "${channel}"`);
+        return;
+      }
+      return handler(event, ...args);
+    });
+  };
 
   // Ensure default session exists
   const existingSessions = getSessions();
@@ -226,7 +408,7 @@ export function registerIpcHandlers(
   updateManager.init();
 
   // Proxy control
-  ipcMain.handle(IPC_CHANNELS.PROXY_START, async (_event, port?: number) => {
+  handleTrusted(IPC_CHANNELS.PROXY_START, async (_event, port?: number) => {
     try {
       if (port) {
         proxyEngine.setPort(port);
@@ -238,7 +420,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.PROXY_STOP, async () => {
+  handleTrusted(IPC_CHANNELS.PROXY_STOP, async () => {
     try {
       await proxyEngine.stop();
       return { success: true };
@@ -247,7 +429,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.PROXY_INSTALL_CERT, async () => {
+  handleTrusted(IPC_CHANNELS.PROXY_INSTALL_CERT, async () => {
     try {
       return certManager.installCaCertWindows();
     } catch (error: any) {
@@ -255,7 +437,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.PROXY_CERT_STATUS, async () => {
+  handleTrusted(IPC_CHANNELS.PROXY_CERT_STATUS, async () => {
     try {
       return {
         exists: certManager.hasCaCert(),
@@ -266,7 +448,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.PROXY_SET_SYSTEM, async (_event, enabled: boolean) => {
+  handleTrusted(IPC_CHANNELS.PROXY_SET_SYSTEM, async (_event, enabled: boolean) => {
     try {
       if (enabled) {
         const port = proxyEngine.getPort();
@@ -280,7 +462,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.PROXY_SET_NO_CACHE, async (_event, enabled: boolean) => {
+  handleTrusted(IPC_CHANNELS.PROXY_SET_NO_CACHE, async (_event, enabled: boolean) => {
     try {
       proxyEngine.setNoCacheEnabled(enabled);
       setAppSetting(NO_CACHE_SETTING_KEY, enabled ? 'true' : 'false');
@@ -290,7 +472,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.PROXY_SET_THROTTLE, async (_event, settings: ThrottleSettings) => {
+  handleTrusted(IPC_CHANNELS.PROXY_SET_THROTTLE, async (_event, settings: ThrottleSettings) => {
     try {
       const normalizedSettings = normalizeThrottleSettings(settings);
       proxyEngine.setThrottleSettings(normalizedSettings);
@@ -305,7 +487,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.PROXY_SET_UPSTREAM, async (_event, settings: UpstreamProxySettings) => {
+  handleTrusted(IPC_CHANNELS.PROXY_SET_UPSTREAM, async (_event, settings: UpstreamProxySettings) => {
     try {
       const normalizedSettings = resolveUpstreamProxySettingsForSave(settings, proxyEngine.getUpstreamProxySettings());
       assertUpstreamProxyPasswordCanPersist(normalizedSettings.password);
@@ -321,7 +503,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.PROXY_STATUS, async (): Promise<ProxyState> => {
+  handleTrusted(IPC_CHANNELS.PROXY_STATUS, async (): Promise<ProxyState> => {
     return {
       running: proxyEngine.isRunning(),
       port: proxyEngine.getPort(),
@@ -337,13 +519,14 @@ export function registerIpcHandlers(
     };
   });
 
-  ipcMain.handle(IPC_CHANNELS.PROTOBUF_GET_CONFIG, async (): Promise<ProtobufSettings> => {
+  handleTrusted(IPC_CHANNELS.PROTOBUF_GET_CONFIG, async (): Promise<ProtobufSettings> => {
     return protobufSettings;
   });
 
-  ipcMain.handle(IPC_CHANNELS.PROTOBUF_SET_CONFIG, async (_event, settings: ProtobufSettings) => {
+  handleTrusted(IPC_CHANNELS.PROTOBUF_SET_CONFIG, async (_event, settings: ProtobufSettings) => {
     try {
       const normalizedSettings = normalizeProtobufSettings(settings);
+      await validateProtoFilePaths(normalizedSettings.protoFilePaths);
       await validateProtobufSettings(normalizedSettings);
       protobufSettings = normalizedSettings;
       setAppSetting(PROTOBUF_SETTINGS_KEY, JSON.stringify(normalizedSettings));
@@ -356,7 +539,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.PROTOBUF_PICK_PROTO_FILES, async () => {
+  handleTrusted(IPC_CHANNELS.PROTOBUF_PICK_PROTO_FILES, async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
       title: 'Select .proto files',
       properties: ['openFile', 'multiSelections'],
@@ -375,7 +558,7 @@ export function registerIpcHandlers(
     };
   });
 
-  ipcMain.handle(IPC_CHANNELS.PROTOBUF_DECODE_BODY, async (_event, request: ProtobufDecodeRequest) => {
+  handleTrusted(IPC_CHANNELS.PROTOBUF_DECODE_BODY, async (_event, request: ProtobufDecodeRequest) => {
     try {
       return {
         success: true,
@@ -387,7 +570,7 @@ export function registerIpcHandlers(
   });
 
   // Traffic
-  ipcMain.handle(IPC_CHANNELS.TRAFFIC_GET_FLOWS, (_event) => {
+  handleTrusted(IPC_CHANNELS.TRAFFIC_GET_FLOWS, (_event) => {
     try {
       const dbFlows = getStoredFlowsSummary(5000, 0, activeSessionId);
       return dbFlows.map(sanitizeFlow);
@@ -396,7 +579,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.TRAFFIC_GET_FLOW, (_event, id: string) => {
+  handleTrusted(IPC_CHANNELS.TRAFFIC_GET_FLOW, (_event, id: string) => {
     try {
       const flow = proxyEngine.getFlow(id);
       if (flow) return sanitizeFlow(flow);
@@ -408,7 +591,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.TRAFFIC_CLEAR, () => {
+  handleTrusted(IPC_CHANNELS.TRAFFIC_CLEAR, () => {
     try {
       proxyEngine.clearFlows();
       clearAllFlows(activeSessionId);
@@ -418,7 +601,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.TRAFFIC_DELETE, (_event, id: string) => {
+  handleTrusted(IPC_CHANNELS.TRAFFIC_DELETE, (_event, id: string) => {
     try {
       const flow = proxyEngine.getFlow(id);
       if (!flow) {
@@ -437,7 +620,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.TRAFFIC_REPEAT, async (_event, id: string) => {
+  handleTrusted(IPC_CHANNELS.TRAFFIC_REPEAT, async (_event, id: string) => {
     try {
       if (!proxyEngine.isRunning()) {
         return { success: false, error: 'Start the proxy before replaying a request.' };
@@ -448,14 +631,14 @@ export function registerIpcHandlers(
         return { success: false, error: 'That request is no longer available to replay.' };
       }
 
-      await replayFlowThroughProxy(flow, proxyEngine.getPort());
+      await replayFlowThroughProxy(flow, proxyEngine.getPort(), proxyEngine.getInternalToken());
       return { success: true };
     } catch (error: any) {
       return { success: false, error: error.message };
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.TRAFFIC_COMPOSE, async (_event, request: ComposerRequest) => {
+  handleTrusted(IPC_CHANNELS.TRAFFIC_COMPOSE, async (_event, request: ComposerRequest) => {
     try {
       if (!proxyEngine.isRunning()) {
         return { success: false, error: 'Start the proxy before sending a composed request.' };
@@ -463,7 +646,7 @@ export function registerIpcHandlers(
 
       const composerRequestId = randomUUID();
       const captured = proxyEngine.getInterceptor().shouldCapture(request.url, request.method);
-      await sendComposedRequestThroughProxy(request, proxyEngine.getPort(), composerRequestId);
+      await sendComposedRequestThroughProxy(request, proxyEngine.getPort(), composerRequestId, proxyEngine.getInternalToken());
       return { success: true, composerRequestId, captured };
     } catch (error: any) {
       return { success: false, error: error.message };
@@ -532,8 +715,10 @@ export function registerIpcHandlers(
     const savedProtobufSettings = getAppSetting(PROTOBUF_SETTINGS_KEY);
     if (savedProtobufSettings) {
       const normalizedSettings = normalizeProtobufSettings(JSON.parse(savedProtobufSettings));
-      protobufSettings = normalizedSettings;
-      void validateProtobufSettings(normalizedSettings).catch((error) => {
+      void validateProtoFilePaths(normalizedSettings.protoFilePaths).then(async () => {
+        protobufSettings = normalizedSettings;
+        await validateProtobufSettings(normalizedSettings);
+      }).catch((error) => {
         console.error('Failed to load protobuf settings from database:', error);
         protobufSettings = DEFAULT_PROTOBUF_SETTINGS;
       });
@@ -551,7 +736,7 @@ export function registerIpcHandlers(
     },
   });
 
-  ipcMain.handle(IPC_CHANNELS.RULES_GET_ALL, () => {
+  handleTrusted(IPC_CHANNELS.RULES_GET_ALL, () => {
     try {
       return Array.from(rules.values());
     } catch (error: any) {
@@ -559,12 +744,40 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.RULES_CREATE, (_event, ruleData: any) => {
+  handleTrusted(IPC_CHANNELS.RULES_CREATE, (_event, ruleData: any) => {
     try {
+      const now = Date.now();
+      const sanitized = sanitizeRulePayload(ruleData);
       const rule: Rule = {
-        ...ruleData,
+        ...sanitized,
         id: randomUUID(),
-        createdAt: Date.now(),
+        createdAt: now,
+        updatedAt: now,
+      };
+      rules.set(rule.id, rule);
+      proxyEngine.getInterceptor().setRules(Array.from(rules.values()));
+      saveRule(rule);
+      return rule;
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  handleTrusted(IPC_CHANNELS.RULES_UPDATE, (_event, ruleData: any) => {
+    try {
+      if (typeof ruleData?.id !== 'string' || !ruleData.id) {
+        return { success: false, error: 'Invalid rule: id is required' };
+      }
+      const existing = rules.get(ruleData.id);
+      if (!existing) {
+        return { success: false, error: 'Rule not found' };
+      }
+      const sanitized = sanitizeRulePayload(ruleData);
+      const rule: Rule = {
+        ...existing,
+        ...sanitized,
+        id: existing.id,
+        createdAt: existing.createdAt,
         updatedAt: Date.now(),
       };
       rules.set(rule.id, rule);
@@ -576,19 +789,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.RULES_UPDATE, (_event, ruleData: Rule) => {
-    try {
-      ruleData.updatedAt = Date.now();
-      rules.set(ruleData.id, ruleData);
-      proxyEngine.getInterceptor().setRules(Array.from(rules.values()));
-      saveRule(ruleData);
-      return ruleData;
-    } catch (error: any) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  ipcMain.handle(IPC_CHANNELS.RULES_DELETE, (_event, id: string) => {
+  handleTrusted(IPC_CHANNELS.RULES_DELETE, (_event, id: string) => {
     try {
       rules.delete(id);
       proxyEngine.getInterceptor().setRules(Array.from(rules.values()));
@@ -599,7 +800,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.RULES_TOGGLE, (_event, id: string) => {
+  handleTrusted(IPC_CHANNELS.RULES_TOGGLE, (_event, id: string) => {
     try {
       const rule = rules.get(id);
       if (rule) {
@@ -616,18 +817,23 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.SCRIPT_TEST, (_event, data: { rule: Omit<ScriptRule, 'id' | 'createdAt' | 'updatedAt'>; flowId: string }): ScriptTestResult => {
+  handleTrusted(IPC_CHANNELS.SCRIPT_TEST, (_event, data: { rule: Omit<ScriptRule, 'id' | 'createdAt' | 'updatedAt'>; flowId: string }): ScriptTestResult => {
     try {
       const flow = proxyEngine.getFlow(data.flowId);
       if (!flow) {
         return { success: false, error: 'Select a captured flow before testing a script.' };
       }
 
+      const sanitized = sanitizeRulePayload({ ...data.rule, type: 'script' });
+      if (sanitized.type !== 'script') {
+        return { success: false, error: 'Invalid script rule' };
+      }
+      const now = Date.now();
       const rule: ScriptRule = {
-        ...data.rule,
+        ...sanitized,
         id: randomUUID(),
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+        createdAt: now,
+        updatedAt: now,
       };
 
       let request = {
@@ -680,7 +886,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.RULES_GET_CAPTURE_MODE, () => {
+  handleTrusted(IPC_CHANNELS.RULES_GET_CAPTURE_MODE, () => {
     try {
       return { success: true, mode: proxyEngine.getInterceptor().getCaptureMode() };
     } catch (error: any) {
@@ -688,7 +894,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.RULES_SET_CAPTURE_MODE, (_event, mode: CaptureFilterMode) => {
+  handleTrusted(IPC_CHANNELS.RULES_SET_CAPTURE_MODE, (_event, mode: CaptureFilterMode) => {
     try {
       if (!['capture-all', 'allow-list', 'block-list'].includes(mode)) {
         return { success: false, mode: proxyEngine.getInterceptor().getCaptureMode(), error: 'Invalid capture mode.' };
@@ -703,7 +909,7 @@ export function registerIpcHandlers(
   });
 
   // Breakpoint
-  ipcMain.handle(IPC_CHANNELS.BREAKPOINT_RESUME, (_event, data: BreakpointResumeMessage) => {
+  handleTrusted(IPC_CHANNELS.BREAKPOINT_RESUME, (_event, data: BreakpointResumeMessage) => {
     try {
       proxyEngine.getInterceptor().resumeFlow(data.flowId, data);
       return { success: true };
@@ -713,7 +919,7 @@ export function registerIpcHandlers(
   });
 
   // Debug: inspect interceptor state
-  ipcMain.handle('debug:interceptor-state', () => {
+  handleTrusted('debug:interceptor-state', () => {
     try {
       return {
         breakpointRules: proxyEngine.getInterceptor().getBreakpointRulesDebug(),
@@ -725,7 +931,7 @@ export function registerIpcHandlers(
   });
 
   // DNS configuration
-  ipcMain.handle(IPC_CHANNELS.DNS_GET_CONFIG, () => {
+  handleTrusted(IPC_CHANNELS.DNS_GET_CONFIG, () => {
     try {
       const resolver = proxyEngine.getDnsResolver();
       return { mode: resolver.getMode(), servers: resolver.getServers() };
@@ -734,7 +940,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.DNS_SET_SERVERS, (_event, servers: string[]) => {
+  handleTrusted(IPC_CHANNELS.DNS_SET_SERVERS, (_event, servers: string[]) => {
     try {
       proxyEngine.getDnsResolver().setServers(servers);
       return { success: true };
@@ -743,7 +949,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.DNS_CLEAR_CACHE, () => {
+  handleTrusted(IPC_CHANNELS.DNS_CLEAR_CACHE, () => {
     try {
       proxyEngine.getDnsResolver().clearCache();
       return { success: true };
@@ -753,7 +959,7 @@ export function registerIpcHandlers(
   });
 
   // Retention
-  ipcMain.handle(IPC_CHANNELS.RETENTION_GET, () => {
+  handleTrusted(IPC_CHANNELS.RETENTION_GET, () => {
     try {
       return { success: true, settings: getRetentionSettings() };
     } catch (error: any) {
@@ -761,7 +967,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.RETENTION_SET, (_event, settings: { maxFlows: number; maxAgeDays: number }) => {
+  handleTrusted(IPC_CHANNELS.RETENTION_SET, (_event, settings: { maxFlows: number; maxAgeDays: number }) => {
     try {
       setRetentionSettings({ maxFlows: settings.maxFlows, maxAgeDays: settings.maxAgeDays });
       runRetentionPolicy();
@@ -771,7 +977,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.RETENTION_PRUNE_NOW, () => {
+  handleTrusted(IPC_CHANNELS.RETENTION_PRUNE_NOW, () => {
     try {
       const deleted = runRetentionPolicy();
       return { success: true, deleted };
@@ -781,7 +987,7 @@ export function registerIpcHandlers(
   });
 
   // gRPC interception hosts
-  ipcMain.handle(IPC_CHANNELS.GRPC_GET_HOSTS, () => {
+  handleTrusted(IPC_CHANNELS.GRPC_GET_HOSTS, () => {
     try {
       return { success: true, hosts: getGrpcHosts() };
     } catch (error: any) {
@@ -789,7 +995,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.GRPC_SET_HOSTS, (_event, hosts: string[]) => {
+  handleTrusted(IPC_CHANNELS.GRPC_SET_HOSTS, (_event, hosts: string[]) => {
     try {
       if (!Array.isArray(hosts)) {
         return { success: false, error: 'hosts must be an array of strings' };
@@ -809,7 +1015,7 @@ export function registerIpcHandlers(
   });
 
   // Agent
-  ipcMain.handle(IPC_CHANNELS.AGENT_SEND_MESSAGE, async (_event, data: { message: string; conversationId?: string }) => {
+  handleTrusted(IPC_CHANNELS.AGENT_SEND_MESSAGE, async (_event, data: { message: string; conversationId?: string }) => {
     try {
       const content = await agentClient.sendMessage(data.message);
       return { success: true, content };
@@ -819,7 +1025,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.AGENT_STATUS, () => {
+  handleTrusted(IPC_CHANNELS.AGENT_STATUS, () => {
     try {
       return { initialized: agentClient.isInitialized() };
     } catch (error: any) {
@@ -827,7 +1033,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.AGENT_PERMISSION_RESPONSE, (_event, data: { id: string; approved: boolean }) => {
+  handleTrusted(IPC_CHANNELS.AGENT_PERMISSION_RESPONSE, (_event, data: { id: string; approved: boolean }) => {
     try {
       agentClient.respondToPermission(data.id, data.approved);
       return { success: true };
@@ -836,7 +1042,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.AGENT_SET_AUTO_APPROVE, (_event, autoApprove: boolean) => {
+  handleTrusted(IPC_CHANNELS.AGENT_SET_AUTO_APPROVE, (_event, autoApprove: boolean) => {
     try {
       agentClient.setAutoApprove(autoApprove);
       return { success: true };
@@ -845,7 +1051,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.AGENT_OPEN_WINDOW, async () => {
+  handleTrusted(IPC_CHANNELS.AGENT_OPEN_WINDOW, async () => {
     try {
       if (agentWindow && !agentWindow.isDestroyed()) {
         agentWindow.focus();
@@ -894,6 +1100,7 @@ export function registerIpcHandlers(
 
       // Harden agent window
       agentWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+      trustedSenders.add(agentWindow.webContents);
       agentWindow.webContents.on('will-navigate', (event, url) => {
         if (MAIN_WINDOW_VITE_DEV_SERVER_URL && url.startsWith(MAIN_WINDOW_VITE_DEV_SERVER_URL)) return;
         event.preventDefault();
@@ -912,7 +1119,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.AGENT_CLOSE_WINDOW, () => {
+  handleTrusted(IPC_CHANNELS.AGENT_CLOSE_WINDOW, () => {
     try {
       if (agentWindow && !agentWindow.isDestroyed()) {
         agentWindow.close();
@@ -925,7 +1132,7 @@ export function registerIpcHandlers(
   });
 
   // App
-  ipcMain.handle(IPC_CHANNELS.APP_GET_VERSION, () => {
+  handleTrusted(IPC_CHANNELS.APP_GET_VERSION, () => {
     try {
       return { version: app.getVersion(), name: app.getName() };
     } catch (error: any) {
@@ -933,7 +1140,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.APP_GET_UPDATE_STATE, () => {
+  handleTrusted(IPC_CHANNELS.APP_GET_UPDATE_STATE, () => {
     try {
       return updateManager.getState();
     } catch (error: any) {
@@ -941,7 +1148,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.APP_CHECK_FOR_UPDATES, async () => {
+  handleTrusted(IPC_CHANNELS.APP_CHECK_FOR_UPDATES, async () => {
     try {
       return await updateManager.checkForUpdates();
     } catch (error: any) {
@@ -949,7 +1156,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.APP_SET_AUTO_UPDATE_ENABLED, async (_event, enabled: boolean) => {
+  handleTrusted(IPC_CHANNELS.APP_SET_AUTO_UPDATE_ENABLED, async (_event, enabled: boolean) => {
     try {
       const result = updateManager.setEnabled(enabled);
       setAppSetting(AUTO_UPDATE_ENABLED_KEY, enabled ? 'true' : 'false');
@@ -959,7 +1166,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.APP_INSTALL_UPDATE, async () => {
+  handleTrusted(IPC_CHANNELS.APP_INSTALL_UPDATE, async () => {
     try {
       return updateManager.installUpdate();
     } catch (error: any) {
@@ -967,7 +1174,7 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.APP_PICK_FILE, async () => {
+  handleTrusted(IPC_CHANNELS.APP_PICK_FILE, async () => {
     try {
       const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
         title: 'Select File',
@@ -981,7 +1188,7 @@ export function registerIpcHandlers(
   });
 
   // HAR Export
-  ipcMain.handle(IPC_CHANNELS.APP_EXPORT_HAR, async (_event, flowIds?: string[]) => {
+  handleTrusted(IPC_CHANNELS.APP_EXPORT_HAR, async (_event, flowIds?: string[]) => {
     try {
       const flows = proxyEngine.getFlows();
       const toExport = flowIds
@@ -1006,7 +1213,7 @@ export function registerIpcHandlers(
   });
 
   // HAR Import
-  ipcMain.handle(IPC_CHANNELS.APP_IMPORT_HAR, async () => {
+  handleTrusted(IPC_CHANNELS.APP_IMPORT_HAR, async () => {
     try {
       const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
         title: 'Import HAR',
@@ -1100,11 +1307,11 @@ export function registerIpcHandlers(
   });
 
   // Sessions
-  ipcMain.handle(IPC_CHANNELS.SESSION_LIST, () => {
+  handleTrusted(IPC_CHANNELS.SESSION_LIST, () => {
     return getSessions();
   });
 
-  ipcMain.handle(IPC_CHANNELS.SESSION_CREATE, (_event, name: string) => {
+  handleTrusted(IPC_CHANNELS.SESSION_CREATE, (_event, name: string) => {
     const now = Date.now();
     const session: Session = {
       id: randomUUID(),
@@ -1116,11 +1323,11 @@ export function registerIpcHandlers(
     return session;
   });
 
-  ipcMain.handle(IPC_CHANNELS.SESSION_RENAME, (_event, { id, name }: { id: string; name: string }) => {
+  handleTrusted(IPC_CHANNELS.SESSION_RENAME, (_event, { id, name }: { id: string; name: string }) => {
     dbRenameSession(id, name);
   });
 
-  ipcMain.handle(IPC_CHANNELS.SESSION_DELETE, (_event, id: string) => {
+  handleTrusted(IPC_CHANNELS.SESSION_DELETE, (_event, id: string) => {
     if (id === 'default') return;
     dbDeleteSession(id);
     if (activeSessionId === id) {
@@ -1129,12 +1336,12 @@ export function registerIpcHandlers(
     }
   });
 
-  ipcMain.handle(IPC_CHANNELS.SESSION_SET_ACTIVE, (_event, id: string) => {
+  handleTrusted(IPC_CHANNELS.SESSION_SET_ACTIVE, (_event, id: string) => {
     activeSessionId = id;
     setActiveSessionId(id);
   });
 
-  ipcMain.handle(IPC_CHANNELS.SESSION_GET_ACTIVE, () => {
+  handleTrusted(IPC_CHANNELS.SESSION_GET_ACTIVE, () => {
     return activeSessionId;
   });
 

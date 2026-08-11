@@ -96,4 +96,11 @@ export const APP_NAME = 'ProxyBoy';
 export const APP_VERSION = '1.0.0';
 export const INTERNAL_REPLAY_HEADER = 'x-proxyboy-replay';
 export const INTERNAL_COMPOSER_HEADER = 'x-proxyboy-composer-id';
+// Random per-process secret. Internal replay/compose requests must present it,
+// otherwise the headers above are treated as spoofed and ignored.
+export const INTERNAL_TOKEN_HEADER = 'x-proxyboy-internal-token';
 export const MAX_STREAM_ITEMS = 500;
+// Single source of truth for how many flows are retained in memory. Both the
+// main-process proxy engine and the renderer store cap at this value, so the
+// renderer never keeps more flows than the engine can hold.
+export const MAX_FLOWS = 10000;

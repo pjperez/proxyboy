@@ -113,7 +113,12 @@ async function buildHarness(originHandler: (stream: http2.ServerHttp2Stream) => 
     key: certs.keyPem,
   });
 
-  const grpcProxy = new GrpcProxy({ certProvider, sink: makeSink(captured) });
+  const grpcProxy = new GrpcProxy({
+    certProvider,
+    sink: makeSink(captured),
+    // The test origin uses a self-signed cert; explicitly trust it.
+    upstreamTlsOptions: { rejectUnauthorized: false },
+  });
 
   // Local h2 origin.
   const origin = http2.createSecureServer({

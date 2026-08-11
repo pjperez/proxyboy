@@ -2,7 +2,7 @@ import * as http from 'http';
 import * as tls from 'tls';
 import { URL } from 'url';
 import type { ComposerRequest, HttpFlow, HttpHeaders } from '../../shared/types';
-import { INTERNAL_COMPOSER_HEADER, INTERNAL_REPLAY_HEADER } from '../../shared/constants';
+import { INTERNAL_COMPOSER_HEADER, INTERNAL_REPLAY_HEADER, INTERNAL_TOKEN_HEADER } from '../../shared/constants';
 
 const REPLAY_TIMEOUT_MS = 30000;
 const HOP_BY_HOP_HEADERS = new Set([
@@ -40,9 +40,11 @@ export function buildReplayHeaders(
   target: URL,
   hasBody: boolean,
   bodyLength: number,
+  internalToken: string,
 ): Record<string, string> {
   return buildProxyHeaders(headers, target, hasBody, bodyLength, {
     [INTERNAL_REPLAY_HEADER]: '1',
+    [INTERNAL_TOKEN_HEADER]: internalToken,
   });
 }
 
@@ -52,9 +54,11 @@ export function buildComposerHeaders(
   hasBody: boolean,
   bodyLength: number,
   composerRequestId: string,
+  internalToken: string,
 ): Record<string, string> {
   return buildProxyHeaders(headers, target, hasBody, bodyLength, {
     [INTERNAL_COMPOSER_HEADER]: composerRequestId,
+    [INTERNAL_TOKEN_HEADER]: internalToken,
   });
 }
 
@@ -250,10 +254,10 @@ function sendHttpsRequestViaProxy(
   });
 }
 
-export async function replayFlowThroughProxy(flow: HttpFlow, proxyPort: number): Promise<void> {
+export async function replayFlowThroughProxy(flow: HttpFlow, proxyPort: number, internalToken: string): Promise<void> {
   const target = new URL(flow.request.url);
   const { buffer: body, hasBody } = getRequestBody(flow.request.body);
-  const headers = buildReplayHeaders(flow.request.headers, target, hasBody, body?.length ?? 0);
+  const headers = buildReplayHeaders(flow.request.headers, target, hasBody, body?.length ?? 0, internalToken);
 
   if (target.protocol === 'https:') {
     await sendHttpsRequestViaProxy(flow.request.method, proxyPort, target, headers, body);
@@ -272,11 +276,12 @@ export async function sendComposedRequestThroughProxy(
   request: ComposerRequest,
   proxyPort: number,
   composerRequestId: string,
+  internalToken: string,
 ): Promise<void> {
   const target = new URL(request.url);
   const hasBody = typeof request.body === 'string' && request.body.length > 0;
   const body = hasBody ? Buffer.from(request.body as string, 'utf8') : undefined;
-  const headers = buildComposerHeaders(request.headers, target, hasBody, body?.length ?? 0, composerRequestId);
+  const headers = buildComposerHeaders(request.headers, target, hasBody, body?.length ?? 0, composerRequestId, internalToken);
 
   if (target.protocol === 'https:') {
     await sendHttpsRequestViaProxy(request.method, proxyPort, target, headers, body);

@@ -19,6 +19,31 @@ const SENSITIVE_HEADERS = new Set([
   'x-auth-token',
 ]);
 
+// Query parameters whose values are never sent to the AI agent.
+const SENSITIVE_QUERY_PARAMS = new Set([
+  'token',
+  'access_token',
+  'refresh_token',
+  'id_token',
+  'api_key',
+  'apikey',
+  'key',
+  'password',
+  'passwd',
+  'pwd',
+  'secret',
+  'client_secret',
+  'auth',
+  'authorization',
+  'signature',
+  'sig',
+  'jwt',
+  'session',
+  'sessionid',
+  'cookie',
+  'code',
+]);
+
 function redactHeaders(headers: Record<string, unknown>): Record<string, unknown> {
   const safe: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(headers)) {
@@ -27,7 +52,25 @@ function redactHeaders(headers: Record<string, unknown>): Record<string, unknown
   return safe;
 }
 
-function previewBody(body?: Buffer | string): string | null {
+function redactQueryParams(url: string): string {
+  try {
+    const parsed = new URL(url);
+    for (const key of Array.from(parsed.searchParams.keys())) {
+      if (SENSITIVE_QUERY_PARAMS.has(key.toLowerCase())) {
+        parsed.searchParams.set(key, '[REDACTED]');
+      }
+    }
+    return parsed.toString();
+  } catch {
+    // Fallback for non-URL strings: mask the value of sensitive params.
+    return url.replace(/([?&][^=]*(?:token|api[_-]?key|key|password|passwd|secret|auth|signature|session|code)=)[^&]+/gi, '$1[REDACTED]');
+  }
+}
+
+// JSON/text value patterns that should never be forwarded to the AI agent.
+const SENSITIVE_VALUE_KEY = /["']((?:password|passwd|pwd|token|access[_-]?token|refresh[_-]?token|id[_-]?token|api[_-]?key|apikey|secret|client[_-]?secret|authorization|auth|session|sessionid|jwt|cookie|signature)[^"']*)["']\s*:\s*["'][^"']*["']/gi;
+
+function redactBody(body?: Buffer | string): string | null {
   if (!body) return null;
   if (Buffer.isBuffer(body)) {
     const sample = body.subarray(0, Math.min(512, body.length));
@@ -39,9 +82,9 @@ function previewBody(body?: Buffer | string): string | null {
     if (nonPrintable > sample.length * 0.1) {
       return `[binary data ${body.length} bytes]`;
     }
-    return body.toString('utf8').slice(0, 5000);
+    return body.toString('utf8').slice(0, 5000).replace(SENSITIVE_VALUE_KEY, (_m, key) => `"${key}": "[REDACTED]"`);
   }
-  return body.slice(0, 5000);
+  return body.slice(0, 5000).replace(SENSITIVE_VALUE_KEY, (_m, key) => `"${key}": "[REDACTED]"`);
 }
 
 export interface SearchTrafficArgs {
@@ -159,7 +202,7 @@ export class AgentClient {
     const summarizeFlow = (flow: HttpFlow) => ({
       id: flow.id,
       method: flow.request.method,
-      url: flow.request.url,
+      url: redactQueryParams(flow.request.url),
       graphqlOperationName: flow.request.graphqlOperationName || null,
       graphqlOperationType: flow.request.graphqlOperationType || null,
       status: flow.response?.statusCode || null,
@@ -210,17 +253,17 @@ export class AgentClient {
             id: flow.id,
             request: {
               method: flow.request.method,
-              url: flow.request.url,
+              url: redactQueryParams(flow.request.url),
               headers: redactHeaders(flow.request.headers),
               bodySize: flow.request.bodySize,
-              body: previewBody(flow.request.body),
+              body: redactBody(flow.request.body),
             },
             response: flow.response ? {
               statusCode: flow.response.statusCode,
               statusMessage: flow.response.statusMessage,
               headers: redactHeaders(flow.response.headers),
               bodySize: flow.response.bodySize,
-              body: previewBody(flow.response.body),
+              body: redactBody(flow.response.body),
               duration: flow.response.duration,
             } : null,
             state: flow.state, tags: flow.tags,

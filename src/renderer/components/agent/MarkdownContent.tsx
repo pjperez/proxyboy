@@ -8,6 +8,29 @@ interface Props {
   content: string;
 }
 
+// Only allow safe URL schemes. React-markdown already filters dangerous
+// schemes by default; this makes the policy explicit and future-proof.
+const SAFE_LINK_PROTOCOLS = ['http:', 'https:', 'mailto:'];
+const SAFE_IMAGE_PROTOCOLS = ['http:', 'https:'];
+const RASTER_DATA_PREFIX = /^data:image\/(png|jpe?g|gif|webp|bmp);base64,/i;
+
+function safeUrl(url: string, isImage: boolean): string {
+  try {
+    const parsed = new URL(url, 'https://proxyboy.invalid');
+    const protocols = isImage ? SAFE_IMAGE_PROTOCOLS : SAFE_LINK_PROTOCOLS;
+    if (protocols.includes(parsed.protocol)) {
+      return url;
+    }
+    // Allow inline raster images (no SVG, which can carry scripts).
+    if (isImage && RASTER_DATA_PREFIX.test(url)) {
+      return url;
+    }
+    return '';
+  } catch {
+    return '';
+  }
+}
+
 const markdownComponents = {
   code({ className, children, ...props }: any) {
     const match = /language-(\w+)/.exec(className || '');
@@ -127,6 +150,7 @@ export default function MarkdownContent({ content }: Props) {
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={markdownComponents}
+        urlTransform={(url, key) => safeUrl(url, key === 'src')}
       >
         {content}
       </ReactMarkdown>
