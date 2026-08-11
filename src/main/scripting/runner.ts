@@ -39,6 +39,88 @@ const SCRIPT_TIMEOUT_MS = 1000;
 const MAX_COMPILED_SCRIPT_CACHE_SIZE = 128;
 const compiledScriptCache = new Map<string, vm.Script>();
 
+// NOTE: `vm` is not a true security boundary. The prelude below reconstructs the
+// request/response inside the context (via JSON round-trip) so scripts only ever
+// see context-realm objects; all helpers are defined in-context so their
+// constructors resolve to the context's (code-generation-blocked) Function.
+// Any host-realm object handed into the sandbox would re-open the escape
+// (`obj.constructor("return process")()`), so `__pb` carries primitives only.
+const PRELUDE = `"use strict";
+const __b64chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+function __utf8Encode(value) {
+  const bytes = [];
+  for (let i = 0; i < value.length; i++) {
+    let cp = value.codePointAt(i);
+    if (cp > 0xFFFF) i++;
+    if (cp < 0x80) bytes.push(cp);
+    else if (cp < 0x800) bytes.push(0xC0 | (cp >> 6), 0x80 | (cp & 0x3F));
+    else if (cp < 0x10000) bytes.push(0xE0 | (cp >> 12), 0x80 | ((cp >> 6) & 0x3F), 0x80 | (cp & 0x3F));
+    else bytes.push(0xF0 | (cp >> 18), 0x80 | ((cp >> 12) & 0x3F), 0x80 | ((cp >> 6) & 0x3F), 0x80 | (cp & 0x3F));
+  }
+  return bytes;
+}
+function __utf8Decode(bytes) {
+  let out = '';
+  for (let i = 0; i < bytes.length; i++) {
+    const b = bytes[i];
+    if (b < 0x80) out += String.fromCharCode(b);
+    else if ((b & 0xE0) === 0xC0) out += String.fromCharCode(((b & 0x1F) << 6) | (bytes[++i] & 0x3F));
+    else if ((b & 0xF0) === 0xE0) out += String.fromCharCode(((b & 0x0F) << 12) | ((bytes[++i] & 0x3F) << 6) | (bytes[++i] & 0x3F));
+    else { const cp = ((b & 0x07) << 18) | ((bytes[++i] & 0x3F) << 12) | ((bytes[++i] & 0x3F) << 6) | (bytes[++i] & 0x3F); out += String.fromCodePoint(cp); }
+  }
+  return out;
+}
+__pb.notes = [];
+globalThis.parseJson = function parseJson(text) { return JSON.parse(text); };
+globalThis.stringifyJson = function stringifyJson(value) { return JSON.stringify(value, null, 2); };
+globalThis.setJsonBody = function setJsonBody(target, value) {
+  target.body = JSON.stringify(value, null, 2);
+  target.bodyEncoding = 'utf8';
+  target.headers['content-type'] = 'application/json';
+};
+globalThis.block = function block(message) {
+  if (!__pb.allowBlocking) {
+    __pb.notes.push('Blocking is only available while handling live request scripts.');
+    return;
+  }
+  __pb.blocked = true;
+  if (message != null) {
+    __pb.notes.push(String(message));
+  }
+};
+globalThis.console = {
+  log: (...args) => __pb.notes.push(args.map((arg) => String(arg)).join(' ')),
+  warn: (...args) => __pb.notes.push(args.map((arg) => String(arg)).join(' ')),
+};
+globalThis.btoa = function btoa(value) {
+  const bytes = __utf8Encode(String(value));
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 3) {
+    const b0 = bytes[i], b1 = i + 1 < bytes.length ? bytes[i + 1] : 0, b2 = i + 2 < bytes.length ? bytes[i + 2] : 0;
+    out += __b64chars[b0 >> 2];
+    out += __b64chars[((b0 & 3) << 4) | (b1 >> 4)];
+    out += i + 1 < bytes.length ? __b64chars[((b1 & 15) << 2) | (b2 >> 6)] : '=';
+    out += i + 2 < bytes.length ? __b64chars[b2 & 63] : '=';
+  }
+  return out;
+};
+globalThis.atob = function atob(value) {
+  const s = String(value).replace(/[^A-Za-z0-9+/]/g, '');
+  const bytes = [];
+  let buffer = 0, bits = 0;
+  for (let i = 0; i < s.length; i++) {
+    const idx = __b64chars.indexOf(s[i]);
+    if (idx === -1) continue;
+    buffer = (buffer << 6) | idx;
+    bits += 6;
+    if (bits >= 8) { bits -= 8; bytes.push((buffer >> bits) & 0xFF); }
+  }
+  return __utf8Decode(bytes);
+};
+globalThis.request = __pb.requestJson != null ? JSON.parse(__pb.requestJson) : undefined;
+globalThis.response = __pb.responseJson != null ? JSON.parse(__pb.responseJson) : undefined;
+`;
+
 function getCompiledScriptCacheKey(rule: ScriptRule): string {
   return `${rule.id}:${rule.updatedAt}:${rule.phase}:${rule.code}`;
 }
@@ -52,7 +134,7 @@ function getCompiledScript(rule: ScriptRule): vm.Script {
     return cachedScript;
   }
 
-  const compiledScript = new vm.Script(`"use strict";\n${rule.code}`);
+  const compiledScript = new vm.Script(`${PRELUDE}\n${rule.code}`);
   compiledScriptCache.set(cacheKey, compiledScript);
   if (compiledScriptCache.size > MAX_COMPILED_SCRIPT_CACHE_SIZE) {
     const oldestKey = compiledScriptCache.keys().next().value;
@@ -161,35 +243,6 @@ function toMutableResponse(response: HttpResponse): MutableResponse {
   };
 }
 
-function toRuntimeRequest(base: HttpRequest, mutable: MutableRequest): HttpRequest {
-  const body = editableBodyToRuntime(mutable.body, mutable.bodyEncoding);
-  const bodySize = Buffer.isBuffer(body) ? body.length : body ? Buffer.byteLength(body, 'utf8') : 0;
-  return {
-    ...base,
-    method: mutable.method,
-    url: mutable.url,
-    protocol: mutable.protocol,
-    host: mutable.host,
-    path: mutable.path,
-    headers: cloneHeaders(mutable.headers),
-    body,
-    bodySize,
-  };
-}
-
-function toRuntimeResponse(base: HttpResponse, mutable: MutableResponse): HttpResponse {
-  const body = editableBodyToRuntime(mutable.body, mutable.bodyEncoding);
-  const bodySize = Buffer.isBuffer(body) ? body.length : body ? Buffer.byteLength(body, 'utf8') : 0;
-  return {
-    ...base,
-    statusCode: mutable.statusCode,
-    statusMessage: mutable.statusMessage,
-    headers: cloneHeaders(mutable.headers),
-    body,
-    bodySize,
-  };
-}
-
 function areBodiesEqual(left?: Buffer | string, right?: Buffer | string): boolean {
   if (left == null && right == null) {
     return true;
@@ -226,54 +279,63 @@ function responsesEqual(left: HttpResponse | undefined, right: HttpResponse | un
     && areBodiesEqual(left.body, right.body);
 }
 
+function toRuntimeRequest(base: HttpRequest, mutable: MutableRequest | null): HttpRequest {
+  if (!mutable) {
+    return base;
+  }
+  const body = editableBodyToRuntime(mutable.body, mutable.bodyEncoding);
+  const bodySize = Buffer.isBuffer(body) ? body.length : body ? Buffer.byteLength(body, 'utf8') : 0;
+  return {
+    ...base,
+    method: mutable.method,
+    url: mutable.url,
+    protocol: mutable.protocol,
+    host: mutable.host,
+    path: mutable.path,
+    headers: cloneHeaders(mutable.headers),
+    body,
+    bodySize,
+  };
+}
+
+function toRuntimeResponse(base: HttpResponse, mutable: MutableResponse | null): HttpResponse {
+  if (!mutable) {
+    return base;
+  }
+  const body = editableBodyToRuntime(mutable.body, mutable.bodyEncoding);
+  const bodySize = Buffer.isBuffer(body) ? body.length : body ? Buffer.byteLength(body, 'utf8') : 0;
+  return {
+    ...base,
+    statusCode: mutable.statusCode,
+    statusMessage: mutable.statusMessage,
+    headers: cloneHeaders(mutable.headers),
+    body,
+    bodySize,
+  };
+}
+
 export function executeScriptRule(
   rule: ScriptRule,
   request: HttpRequest,
   response?: HttpResponse,
   allowBlocking = true,
 ): ScriptExecutionResult {
-  const notes: string[] = [];
   const originalRequest = cloneRequest(request);
   const originalResponse = cloneResponse(response);
   const mutableRequest = toMutableRequest(request);
   const mutableResponse = response ? toMutableResponse(response) : undefined;
-  let blocked = false;
 
-  Object.setPrototypeOf(mutableRequest, null);
-  Object.setPrototypeOf(mutableRequest.headers, null);
-  if (mutableResponse) {
-    Object.setPrototypeOf(mutableResponse, null);
-    Object.setPrototypeOf(mutableResponse.headers, null);
-  }
-
-  const sandbox = Object.assign(Object.create(null), {
-    request: mutableRequest,
-    response: mutableResponse,
-    block: (message?: unknown) => {
-      if (!allowBlocking) {
-        notes.push('Blocking is only available while handling live request scripts.');
-        return;
-      }
-      blocked = true;
-      if (message != null) {
-        notes.push(String(message));
-      }
-    },
-    parseJson: (text: string) => JSON.parse(text),
-    stringifyJson: (value: unknown) => JSON.stringify(value, null, 2),
-    setJsonBody: (target: MutableRequest | MutableResponse, value: unknown) => {
-      target.body = JSON.stringify(value, null, 2);
-      target.bodyEncoding = 'utf8';
-      target.headers['content-type'] = 'application/json';
-    },
-    atob: (value: string) => Buffer.from(value, 'base64').toString('utf8'),
-    btoa: (value: string) => Buffer.from(value, 'utf8').toString('base64'),
-    console: {
-      log: (...args: unknown[]) => notes.push(args.map((arg) => String(arg)).join(' ')),
-      warn: (...args: unknown[]) => notes.push(args.map((arg) => String(arg)).join(' ')),
-    },
+  // Only primitives cross the host→context boundary. The request/response travel
+  // as JSON strings; the prelude rebuilds them inside the context so every object
+  // the script touches is context-realm and cannot be used to smuggle host code in.
+  const pb = Object.assign(Object.create(null), {
+    allowBlocking: allowBlocking,
+    blocked: false,
+    requestJson: JSON.stringify(mutableRequest),
+    responseJson: mutableResponse ? JSON.stringify(mutableResponse) : null,
   });
-  Object.setPrototypeOf(sandbox.console, null);
+
+  const sandbox = Object.assign(Object.create(null), { __pb: pb });
   const context = vm.createContext(sandbox, {
     codeGeneration: {
       strings: false,
@@ -284,10 +346,13 @@ export function executeScriptRule(
   const script = getCompiledScript(rule);
   script.runInContext(context, { timeout: SCRIPT_TIMEOUT_MS });
 
-  const nextRequest = toRuntimeRequest(originalRequest, mutableRequest);
-  const nextResponse = mutableResponse && originalResponse
-    ? toRuntimeResponse(originalResponse, mutableResponse)
+  const nextRequest = toRuntimeRequest(originalRequest, sandbox.request);
+  const nextResponse = sandbox.response && originalResponse
+    ? toRuntimeResponse(originalResponse, sandbox.response)
     : originalResponse;
+
+  const blocked = pb.blocked === true;
+  const notes = Array.isArray(pb.notes) ? Array.from(pb.notes as unknown[]) as string[] : [];
 
   const requestBodyModified = !areBodiesEqual(originalRequest.body, nextRequest.body);
   const responseBodyModified = !areBodiesEqual(originalResponse?.body, nextResponse?.body);

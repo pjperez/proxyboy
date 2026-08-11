@@ -58,8 +58,46 @@ export function getDatabase(): SqlJsDatabase {
 export function persistDatabase(): void {
   if (db && dbPath && dirty) {
     const data = db.export();
-    fs.writeFileSync(dbPath, Buffer.from(data));
+    writeDatabaseAtomically(dbPath, Buffer.from(data));
     dirty = false;
+  }
+}
+
+/**
+ * Persist the database via a temp file + atomic rename so a crash mid-write
+ * can never leave a truncated/corrupt database behind.
+ */
+function writeDatabaseAtomically(targetPath: string, data: Buffer): void {
+  const dir = path.dirname(targetPath);
+  const tempPath = path.join(dir, `.${path.basename(targetPath)}.tmp-${process.pid}`);
+  try {
+    const fd = fs.openSync(tempPath, 'w');
+    try {
+      fs.writeSync(fd, data);
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+    try {
+      fs.renameSync(tempPath, targetPath);
+    } catch (renameError: any) {
+      // On Windows, rename over an existing file can fail; fall back to a
+      // remove-then-rename (still far safer than a direct in-place write).
+      if (renameError.code === 'EPERM' || renameError.code === 'EEXIST') {
+        fs.unlinkSync(targetPath);
+        fs.renameSync(tempPath, targetPath);
+      } else {
+        throw renameError;
+      }
+    }
+  } finally {
+    if (fs.existsSync(tempPath)) {
+      try {
+        fs.unlinkSync(tempPath);
+      } catch {
+        // Best-effort cleanup of the temp file.
+      }
+    }
   }
 }
 

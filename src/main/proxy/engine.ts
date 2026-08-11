@@ -3,7 +3,7 @@ import { Proxy } from 'http-mitm-proxy';
 import type { IProxy } from 'http-mitm-proxy';
 import * as http from 'http';
 import * as https from 'https';
-import { randomUUID } from 'crypto';
+import { randomBytes, randomUUID, timingSafeEqual } from 'crypto';
 import { gunzip, inflate, brotliDecompress } from 'zlib';
 import { promisify } from 'util';
 import { createBodyCapture, type BodyCapture } from './body-capture';
@@ -19,7 +19,7 @@ import {
   StoredBody,
   TrafficFlowUpdate,
 } from '../../shared/types';
-import { INTERNAL_COMPOSER_HEADER, INTERNAL_REPLAY_HEADER, MAX_STREAM_ITEMS } from '../../shared/constants';
+import { INTERNAL_COMPOSER_HEADER, INTERNAL_REPLAY_HEADER, INTERNAL_TOKEN_HEADER, MAX_FLOWS, MAX_STREAM_ITEMS } from '../../shared/constants';
 import { CertificateManager } from './certificate';
 import { Interceptor } from './interceptor';
 import { DnsResolverService } from './dns-resolver';
@@ -55,7 +55,6 @@ import {
   type UpstreamProxyAgents,
 } from './upstream-proxy';
 
-const MAX_FLOWS = 10000;
 const MAX_BODY_SIZE = 2 * 1024 * 1024; // 2 MB
 
 const gunzipAsync = promisify(gunzip);
@@ -464,6 +463,7 @@ export class ProxyEngine extends EventEmitter {
   private directAgents: UpstreamProxyAgents;
   private upstreamAgents: UpstreamProxyAgents | null;
   private grpcProxy: GrpcProxy | null = null;
+  private readonly internalToken = randomBytes(32).toString('hex');
 
   constructor(options: ProxyEngineOptions, certManager: CertificateManager) {
     super();
@@ -475,6 +475,25 @@ export class ProxyEngine extends EventEmitter {
     this.upstreamProxySettings = normalizeUpstreamProxySettings(options.upstreamProxySettings);
     this.directAgents = createDirectAgents();
     this.upstreamAgents = createUpstreamProxyAgents(this.upstreamProxySettings);
+  }
+
+  getInternalToken(): string {
+    return this.internalToken;
+  }
+
+  private hasValidInternalToken(token: string | undefined): boolean {
+    if (!token) {
+      return false;
+    }
+    const a = Buffer.from(token);
+    const b = Buffer.from(this.internalToken);
+    // Constant-time comparison over fixed-length buffers.
+    if (a.length !== b.length) {
+      // Still burn equal time to avoid length-based timing leaks.
+      timingSafeEqual(b, b);
+      return false;
+    }
+    return timingSafeEqual(a, b);
   }
 
   getInterceptor(): Interceptor {
@@ -709,58 +728,6 @@ export class ProxyEngine extends EventEmitter {
       if (err) this.emit('proxy:error', err);
     });
 
-    // Suppress noisy console output from http-mitm-proxy internals.
-    const NOISE_PATTERNS = [
-      'HTTPS_CLIENT_ERROR',
-      'creating SNI context',
-      'HPE_HEADER_OVERFLOW',
-      'SSLV3_ALERT_CERTIFICATE_UNKNOWN',
-      'ERR_HTTP_REQUEST_TIMEOUT',
-      'Header overflow',
-      'ECONNRESET',
-      'ECONNREFUSED',
-      'ETIMEDOUT',
-      'EPIPE',
-      'Socket error',
-      'Got ECONNRESET',
-      'https server started',
-      'SNI enabled',
-      'ERR_SSL_',
-      'OPENSSL_internal',
-      'Parse Error:',
-    ];
-    let suppressUntil = 0;
-
-    const shouldSuppressWrite = (chunk: any): boolean => {
-      const now = Date.now();
-      const str = typeof chunk === 'string' ? chunk : chunk?.toString?.() || '';
-      if (now < suppressUntil) {
-        suppressUntil = now + 200;
-        return true;
-      }
-      for (const p of NOISE_PATTERNS) {
-        if (str.includes(p)) {
-          suppressUntil = now + 200;
-          return true;
-        }
-      }
-      return false;
-    };
-
-    const origStderrWrite = process.stderr.write.bind(process.stderr);
-    this.origStderrWrite = origStderrWrite;
-    process.stderr.write = (chunk: any, ...args: any[]) => {
-      if (shouldSuppressWrite(chunk)) return true;
-      return origStderrWrite(chunk, ...args);
-    };
-
-    const origStdoutWrite = process.stdout.write.bind(process.stdout);
-    this.origStdoutWrite = origStdoutWrite;
-    process.stdout.write = (chunk: any, ...args: any[]) => {
-      if (shouldSuppressWrite(chunk)) return true;
-      return origStdoutWrite(chunk, ...args);
-    };
-
     this.proxy.onWebSocketConnection((ctx: any, callback: () => void) => {
       const flow = this.createWebSocketFlow(ctx);
       if (!flow) {
@@ -876,8 +843,14 @@ export class ProxyEngine extends EventEmitter {
       let bufferedRequestBytes = 0;
       let requestBodyTruncated = false;
       const startTime = Date.now();
-      const replayed = Boolean(ctx.clientToProxyRequest.headers[INTERNAL_REPLAY_HEADER]);
-      const composerRequestIdHeader = ctx.clientToProxyRequest.headers[INTERNAL_COMPOSER_HEADER];
+      // Internal markers are only honored when the request was initiated by this
+      // process (replay/compose). Clients can freely spoof the marker headers, so
+      // require a per-process secret to accompany them.
+      const tokenHeader = ctx.clientToProxyRequest.headers[INTERNAL_TOKEN_HEADER];
+      const token = typeof tokenHeader === 'string' ? tokenHeader : Array.isArray(tokenHeader) ? tokenHeader[0] : undefined;
+      const trustedInternalRequest = this.hasValidInternalToken(token);
+      const replayed = trustedInternalRequest && Boolean(ctx.clientToProxyRequest.headers[INTERNAL_REPLAY_HEADER]);
+      const composerRequestIdHeader = trustedInternalRequest ? ctx.clientToProxyRequest.headers[INTERNAL_COMPOSER_HEADER] : undefined;
       const composerRequestId = typeof composerRequestIdHeader === 'string'
         ? composerRequestIdHeader
         : Array.isArray(composerRequestIdHeader)
@@ -887,12 +860,11 @@ export class ProxyEngine extends EventEmitter {
       const throttleProfile = throttleController.getProfile();
       const requestScripts = this.interceptor.getScriptRules(requestUrl, requestMethod, 'request');
       const pendingScriptNotes: string[] = [];
-      if (replayed) {
-        delete ctx.clientToProxyRequest.headers[INTERNAL_REPLAY_HEADER];
-      }
-      if (composerRequestId) {
-        delete ctx.clientToProxyRequest.headers[INTERNAL_COMPOSER_HEADER];
-      }
+      // Strip all internal markers before the request leaves the proxy — even
+      // spoofed ones — so upstream servers never see them.
+      delete ctx.clientToProxyRequest.headers[INTERNAL_REPLAY_HEADER];
+      delete ctx.clientToProxyRequest.headers[INTERNAL_COMPOSER_HEADER];
+      delete ctx.clientToProxyRequest.headers[INTERNAL_TOKEN_HEADER];
       const initialTags = replayed ? ['replayed'] : [];
       if (composerRequestId) {
         initialTags.push('composed');
@@ -1714,6 +1686,7 @@ export class ProxyEngine extends EventEmitter {
 
     await this.certManager.initialize();
     this.setup();
+    this.installWriteSuppression();
 
     return new Promise<void>((resolve, reject) => {
       this.proxy.listen(
@@ -1728,6 +1701,7 @@ export class ProxyEngine extends EventEmitter {
         },
         (err?: Error) => {
           if (err) {
+            this.restoreWriteSuppression();
             reject(err);
             return;
           }
@@ -1742,6 +1716,7 @@ export class ProxyEngine extends EventEmitter {
   async stop(): Promise<void> {
     if (!this.running) return;
     this.interceptor.clearPausedFlows();
+    this.restoreWriteSuppression();
     if (this.grpcProxy) {
       try {
         await this.grpcProxy.close();
@@ -1752,6 +1727,71 @@ export class ProxyEngine extends EventEmitter {
     }
     this.proxy.close();
     this.running = false;
+    this.emit('proxy:stopped');
+  }
+
+  /**
+   * Monkey-patch process.stdout/stderr to suppress noisy output from
+   * http-mitm-proxy internals. Idempotent: calling it while already patched is
+   * a no-op, and every start() is paired with a restore in stop().
+   */
+  private installWriteSuppression(): void {
+    if (this.origStdoutWrite || this.origStderrWrite) return;
+
+    const NOISE_PATTERNS = [
+      'HTTPS_CLIENT_ERROR',
+      'creating SNI context',
+      'HPE_HEADER_OVERFLOW',
+      'SSLV3_ALERT_CERTIFICATE_UNKNOWN',
+      'ERR_HTTP_REQUEST_TIMEOUT',
+      'Header overflow',
+      'ECONNRESET',
+      'ECONNREFUSED',
+      'ETIMEDOUT',
+      'EPIPE',
+      'Socket error',
+      'Got ECONNRESET',
+      'https server started',
+      'SNI enabled',
+      'ERR_SSL_',
+      'OPENSSL_internal',
+      'Parse Error:',
+    ];
+    let suppressUntil = 0;
+
+    const shouldSuppressWrite = (chunk: any): boolean => {
+      const now = Date.now();
+      const str = typeof chunk === 'string' ? chunk : chunk?.toString?.() || '';
+      if (now < suppressUntil) {
+        suppressUntil = now + 200;
+        return true;
+      }
+      for (const p of NOISE_PATTERNS) {
+        if (str.includes(p)) {
+          suppressUntil = now + 200;
+          return true;
+        }
+      }
+      return false;
+    };
+
+    const origStderrWrite = process.stderr.write.bind(process.stderr);
+    this.origStderrWrite = origStderrWrite;
+    process.stderr.write = (chunk: any, ...args: any[]) => {
+      if (shouldSuppressWrite(chunk)) return true;
+      return origStderrWrite(chunk, ...args);
+    };
+
+    const origStdoutWrite = process.stdout.write.bind(process.stdout);
+    this.origStdoutWrite = origStdoutWrite;
+    process.stdout.write = (chunk: any, ...args: any[]) => {
+      if (shouldSuppressWrite(chunk)) return true;
+      return origStdoutWrite(chunk, ...args);
+    };
+  }
+
+  /** Undo installWriteSuppression, restoring the original write functions. */
+  private restoreWriteSuppression(): void {
     if (this.origStdoutWrite) {
       process.stdout.write = this.origStdoutWrite;
       this.origStdoutWrite = null;
@@ -1760,7 +1800,6 @@ export class ProxyEngine extends EventEmitter {
       process.stderr.write = this.origStderrWrite;
       this.origStderrWrite = null;
     }
-    this.emit('proxy:stopped');
   }
 
   private getDefaultAgents(): UpstreamProxyAgents {

@@ -14,6 +14,11 @@ vi.mock('fs', async (importOriginal) => {
       writeFileCalls.count++;
       return mod.writeFileSync(...args);
     },
+    // Atomic persistence writes via writeSync (temp file + rename).
+    writeSync: (...args: Parameters<typeof fs.writeSync>) => {
+      writeFileCalls.count++;
+      return mod.writeSync(...args);
+    },
   };
 });
 

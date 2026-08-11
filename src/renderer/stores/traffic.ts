@@ -1,8 +1,6 @@
 import { create } from 'zustand';
-import { MAX_STREAM_ITEMS } from '../../shared/constants';
+import { MAX_FLOWS, MAX_STREAM_ITEMS } from '../../shared/constants';
 import type { HttpFlow, FilterCriteria, TrafficFlowUpdate, WebSocketFrame, SseEvent } from '../../shared/types';
-
-const MAX_RENDERER_FLOWS = 5000;
 
 interface TrafficState {
   flows: HttpFlow[];
@@ -181,11 +179,10 @@ export const useTrafficStore = create<TrafficState>((set, get) => ({
   addFlow: (flow) =>
     set((state) => {
       const next = [...state.flows, flow];
-      const flows = next.length > MAX_RENDERER_FLOWS
-        ? next.slice(Math.floor(MAX_RENDERER_FLOWS * 0.2))
+      const flows = next.length > MAX_FLOWS
+        ? next.slice(Math.floor(MAX_FLOWS * 0.2))
         : next;
-
-      if (next.length > MAX_RENDERER_FLOWS) {
+      if (next.length > MAX_FLOWS) {
         return {
           flows,
           ...reconcileComparisonState(flows, state.markedFlowId, state.compareTargetFlowId),
